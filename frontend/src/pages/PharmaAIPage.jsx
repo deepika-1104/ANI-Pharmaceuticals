@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import useThemeStore        from '../store/useThemeStore';
 import useChatStore         from '../store/useChatStore';
 import useAuthStore         from '../store/useAuthStore';
@@ -11,11 +11,11 @@ import LogisticsDashboard    from '../components/ai/LogisticsDashboard';
 import EnterpriseDashboard   from '../components/ai/EnterpriseDashboard';
 
 const SIDEBAR_ITEMS = [
-  { id: 'Enterprise', icon: '📊', label: 'Enterprise level dashboard', color: '#6366f1' },
-  { id: 'Production', icon: '🏭', label: 'Production dashboard',       color: '#6366f1' },
-  { id: 'Packaging',  icon: '📦', label: 'Packaging dashboard',        color: '#0ea5e9' },
-  { id: 'Quality',    icon: '📋', label: 'Quality dashboard',          color: '#10b981' },
-  { id: 'Logistics',  icon: '🚛', label: 'Logistics dashboard',        color: '#f59e0b' },
+  { id: 'Enterprise', icon: '📊', label: 'Enterprise Overview', color: '#6366f1' },
+  { id: 'Production', icon: '🏭', label: 'Production Overview',       color: '#6366f1' },
+  { id: 'Packaging',  icon: '📦', label: 'Packaging Overview',        color: '#0ea5e9' },
+  { id: 'Quality',    icon: '📋', label: 'Quality Overview',          color: '#10b981' },
+  { id: 'Logistics',  icon: '🚛', label: 'Logistics Overview',        color: '#f59e0b' },
 ];
 
 const DOMAIN_DASHBOARDS = {
@@ -28,6 +28,8 @@ const DOMAIN_DASHBOARDS = {
 
 export default function PharmaAIPage() {
   const [selectedDomain, setSelectedDomain] = useState('Production');
+
+  const scrollContainerRef = useRef(null);
 
   const loadTheme     = useThemeStore((s) => s.loadTheme);
   const loadFromCache = useChatStore((s) => s.loadFromCache);
@@ -108,22 +110,21 @@ export default function PharmaAIPage() {
           </nav>
         </aside>
 
-        {/* Main content: chat fills viewport height, dashboard below */}
-        <main className="flex-1 min-w-0 overflow-y-auto flex flex-col">
+        {/* Main content — single scrollbar, everything flows in one column */}
+        <main
+          className="flex-1 min-w-0 overflow-y-auto flex flex-col"
+          ref={scrollContainerRef}
+        >
+          {/* Chat section — no inner scroll; messages flow with the page */}
+          <ChatWindow scrollContainerRef={scrollContainerRef} />
 
-          {/* Chat section fills the viewport */}
-          <div className="flex flex-col flex-shrink-0" style={{ height: 'calc(100dvh - 64px)' }}>
-            <ChatWindow />
-          </div>
-
-          {/* Domain dashboard workspace — revealed by scrolling */}
-          <div className="flex-shrink-0 mb-10 border-t border-[var(--brd)]">
+          {/* Dashboard below the chat */}
+          <div className="border-t border-[var(--brd)]">
             <div className="text-[11px] font-bold tracking-widest text-[var(--txt3)] uppercase px-5 py-2.5 border-b border-[var(--brd)] bg-[var(--surf)]">
               {selectedDomain} Dashboard
             </div>
             <DomainDashboard />
           </div>
-
         </main>
       </div>
     </div>
