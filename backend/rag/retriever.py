@@ -35,6 +35,7 @@ The orchestrator passes this set to Stage 8's system prompt so the LLM cites onl
 from that known list, preventing hallucinated citations.
 """
 
+import contextvars
 import logging
 import os
 import re
@@ -56,6 +57,89 @@ _RAG_INDEX   = "rag_vector_index"   # Atlas vector index name — separate from 
 # coverage without a code change.  Default 50 handles documents up to ~50 sections
 # while staying well within Atlas free-tier limits.
 _CANDIDATE_K: int = int(os.getenv("RAG_CANDIDATE_K", "50"))
+
+# Request-scoped task-local variable for query understanding
+query_understanding_var = contextvars.ContextVar(
+    "query_understanding",
+    default={
+        "category": "general_plant_knowledge",
+        "identified_equipments": [],
+        "recommended_strategy": "plant_wide",
+        "ambiguous_match": False,
+        "explanation": "No equipment identified. Defaulting to plant-wide retrieval."
+    }
+)
+
+
+async def _get_known_equipments(db: motor.motor_asyncio.AsyncIOMotorDatabase) -> list[str]:
+    """Retrieve unique equipment names from machinery and rag_documents collections."""
+    db_equipments = set()
+    try:
+        collections = await db.list_collection_names()
+        if "rag_documents" in collections:
+            cursor = db["rag_documents"].find({}, {"equipment": 1})
+            async for doc in cursor:
+                eq = doc.get("equipment")
+                if eq:
+                    db_equipments.add(eq)
+        if "machinery" in collections:
+            cursor = db["machinery"].find({}, {"machinery_name": 1})
+            async for mach in cursor:
+                eq = mach.get("machinery_name")
+                if eq:
+                    db_equipments.add(eq)
+    except Exception as exc:
+        logger.warning("[RAG RETRIEVER] Failed to fetch known equipments: %s", exc)
+    return [eq for eq in db_equipments if eq and eq != "General"]
+
+
+def resolve_equipment_deterministically(query: str, known_equipments: list[str]) -> list[str]:
+    """
+    Deterministically identify referenced equipments from the query text.
+    Uses exact matches, case-insensitive substring matches, partial matches,
+    token-based matching, and dynamic abbreviation matching.
+    """
+    if not query or not query.strip():
+        return []
+        
+    query_lower = query.lower()
+    query_words = set(re.findall(r"\b\w+\b", query_lower))
+    
+    matched = []
+    for eq in known_equipments:
+        eq_lower = eq.lower()
+        
+        # 1. Exact or Substring match (case-insensitive)
+        if eq_lower in query_lower:
+            matched.append(eq)
+            continue
+            
+        # 2. Token-based matching: check if all non-trivial words in the equipment name are in the query
+        ignore_words = {"and", "the", "system", "machine", "scanner", "robot", "press", "line", "lines"}
+        eq_words = [w for w in re.findall(r"\b\w+\b", eq_lower) if w not in ignore_words]
+        if eq_words and all(w in query_words for w in eq_words):
+            matched.append(eq)
+            continue
+            
+        # 3. Dynamic abbreviation/acronym matching
+        abbrevs = []
+        # a. Upper case words from original name (e.g. "CT" from "CT Scanner")
+        for w in eq.split():
+            clean_w = re.sub(r"[^a-zA-Z]", "", w)
+            if len(clean_w) >= 2 and clean_w.isupper():
+                abbrevs.append(clean_w.lower())
+        # b. First letters of words (acronyms of length >= 3)
+        words_only = re.findall(r"\b[a-zA-Z]+\b", eq)
+        if len(words_only) >= 3:
+            acronym = "".join(w[0].upper() for w in words_only)
+            abbrevs.append(acronym.lower())
+            
+        # Check if any abbreviation is present as a whole word in the query
+        if any(abbrev in query_words for abbrev in abbrevs):
+            matched.append(eq)
+            continue
+            
+    return list(set(matched))
 
 
 def _scope_filter(user_id: str = "", org_id: Optional[str] = None) -> dict:
@@ -99,6 +183,63 @@ async def retrieve_all_user_chunks(
         return [], []
 
 
+async def _retrieve_candidates(
+    db: motor.motor_asyncio.AsyncIOMotorDatabase,
+    query_vector: Optional[list[float]],
+    query_text: str,
+    user_id: str,
+    org_id: Optional[str] = None,
+    equipments: Optional[list[str]] = None,
+) -> list[dict]:
+    """Retrieve search candidates using vector search, falling back to keyword search."""
+    candidates = []
+    if query_vector:
+        candidates = await _vector_search(db, query_vector, user_id, _CANDIDATE_K, org_id, equipments=equipments)
+    if not candidates:
+        candidates = await _keyword_search(db, query_text, user_id, _CANDIDATE_K, org_id, equipments=equipments)
+    return candidates
+
+
+async def _retrieve_boosted_candidates(
+    db: motor.motor_asyncio.AsyncIOMotorDatabase,
+    query_vector: Optional[list[float]],
+    query_text: str,
+    user_id: str,
+    org_id: Optional[str],
+    equipments: list[str],
+) -> list[dict]:
+    """
+    Retrieve from equipment folder and plant-wide, merge, deduplicate,
+    and apply RAG_EQUIPMENT_BOOST to matching equipment chunks.
+    """
+    from config.settings import RAG_EQUIPMENT_BOOST
+    
+    # 1. Fetch equipment-scoped candidates
+    eq_candidates = await _retrieve_candidates(db, query_vector, query_text, user_id, org_id, equipments=equipments)
+    for c in eq_candidates:
+        c["score"] = min(1.0, c.get("score", 0.0) * RAG_EQUIPMENT_BOOST)
+        c["equipment_matched"] = True
+        
+    # 2. Fetch plant-wide candidates
+    plant_candidates = await _retrieve_candidates(db, query_vector, query_text, user_id, org_id, equipments=None)
+    
+    # Merge and deduplicate
+    candidates = list(eq_candidates)
+    seen_chunks = {(c["doc_id"], c["chunk_index"]) for c in candidates}
+    for c in plant_candidates:
+        key = (c["doc_id"], c["chunk_index"])
+        if key not in seen_chunks:
+            if c.get("equipment") in equipments:
+                c["score"] = min(1.0, c.get("score", 0.0) * RAG_EQUIPMENT_BOOST)
+                c["equipment_matched"] = True
+            candidates.append(c)
+            seen_chunks.add(key)
+            
+    # Sort merged candidates by score descending
+    candidates.sort(key=lambda x: x.get("score", 0.0), reverse=True)
+    return candidates
+
+
 async def retrieve_chunks(
     db: motor.motor_asyncio.AsyncIOMotorDatabase,
     query_vector: Optional[list[float]],
@@ -106,23 +247,79 @@ async def retrieve_chunks(
     user_id: str,
     top_k: int = 5,
     org_id: Optional[str] = None,
+    intent: Optional[str] = None,
 ) -> tuple[list[dict], list[str]]:
     """
     Return (chunks, source_filenames).
 
-    chunks          : top-k dicts with keys {text, filename, chunk_index, score, doc_id}
-    source_filenames: deduplicated list of filenames that contributed chunks — used as
-                      the citation allowed-list passed to the Stage 8 system prompt.
+    chunks          : top-k dicts with keys {text, filename, chunk_index, score, doc_id, equipment}
+    source_filenames: deduplicated list of filenames that contributed chunks.
 
-    Retrieval covers both user-scoped and org-scoped chunks in a single pass.
+    Retrieves chunks with intelligent equipment-aware routing and boosting.
     """
     candidates: list[dict] = []
 
-    if query_vector:
-        candidates = await _vector_search(db, query_vector, user_id, _CANDIDATE_K, org_id)
-
-    if not candidates:
-        candidates = await _keyword_search(db, query_text, user_id, _CANDIDATE_K, org_id)
+    # ── Conversational / Workflow Automation Bypass ───────────────────────────
+    if intent in ("conversational", "workflow_automation"):
+        understanding = {
+            "category": intent,
+            "identified_equipments": [],
+            "recommended_strategy": "plant_wide",
+            "ambiguous_match": False,
+            "explanation": f"Bypassing equipment matching for {intent} query."
+        }
+        query_understanding_var.set(understanding)
+        logger.info("[RAG RETRIEVER] Bypassing equipment resolution (intent=%s)", intent)
+        candidates = await _retrieve_candidates(db, query_vector, query_text, user_id, org_id, equipments=None)
+    else:
+        # ── Deterministic Equipment Resolution ────────────────────────────────
+        known_equipments = await _get_known_equipments(db)
+        matched_equipments = resolve_equipment_deterministically(query_text, known_equipments)
+        
+        if len(matched_equipments) == 1:
+            # Single Confident Match
+            matched_eq = matched_equipments[0]
+            understanding = {
+                "category": "equipment_specific",
+                "identified_equipments": [matched_eq],
+                "recommended_strategy": "equipment_scoped",
+                "ambiguous_match": False,
+                "explanation": f"Confident match for single equipment: {matched_eq}."
+            }
+            query_understanding_var.set(understanding)
+            logger.info("[RAG RETRIEVER] Equipment resolved: %s", matched_eq)
+            
+            # Retrieve with boost
+            candidates = await _retrieve_boosted_candidates(db, query_vector, query_text, user_id, org_id, [matched_eq])
+            
+        elif len(matched_equipments) > 1:
+            # Ambiguous Matches
+            understanding = {
+                "category": "multi_equipment",
+                "identified_equipments": matched_equipments,
+                "recommended_strategy": "plant_wide",
+                "ambiguous_match": True,
+                "explanation": f"Ambiguous matches between multiple equipments: {matched_equipments}."
+            }
+            query_understanding_var.set(understanding)
+            logger.info("[RAG RETRIEVER] Ambiguous matches: %s. Defaulting to plant-wide, no boost.", matched_equipments)
+            
+            # Fall back to plant-wide retrieval
+            candidates = await _retrieve_candidates(db, query_vector, query_text, user_id, org_id, equipments=None)
+            
+        else:
+            # No Matches
+            understanding = {
+                "category": "general_plant_knowledge",
+                "identified_equipments": [],
+                "recommended_strategy": "plant_wide",
+                "ambiguous_match": False,
+                "explanation": "No equipment identified. Defaulting to plant-wide retrieval."
+            }
+            query_understanding_var.set(understanding)
+            logger.info("[RAG RETRIEVER] No equipment matched. Defaulting to plant-wide retrieval.")
+            
+            candidates = await _retrieve_candidates(db, query_vector, query_text, user_id, org_id, equipments=None)
 
     if not candidates:
         return [], []
@@ -142,6 +339,7 @@ async def _vector_search(
     user_id: str,
     limit: int,
     org_id: Optional[str] = None,
+    equipments: Optional[list[str]] = None,
 ) -> list[dict]:
     # Scope filtering is done as a $match stage AFTER $vectorSearch rather than
     # inside $vectorSearch.filter.
@@ -157,6 +355,9 @@ async def _vector_search(
         }
     ]
     scope = _scope_filter(user_id, org_id)
+    if equipments:
+        scope["equipment"] = {"$in": equipments}
+        
     if scope:
         pipeline.append({"$match": scope})
     pipeline.extend([
@@ -169,6 +370,7 @@ async def _vector_search(
                 "chunk_index": 1,
                 "text": 1,
                 "scope": 1,
+                "equipment": 1,
                 "score": {"$meta": "vectorSearchScore"},
             }
         },
@@ -194,6 +396,7 @@ async def _keyword_search(
     user_id: str,
     limit: int,
     org_id: Optional[str] = None,
+    equipments: Optional[list[str]] = None,
 ) -> list[dict]:
     """
     Case-insensitive regex search on chunk text.
@@ -211,6 +414,9 @@ async def _keyword_search(
     or_text_clauses = [{"text": {"$regex": t, "$options": "i"}} for t in tokens]
     
     scope = _scope_filter(user_id, org_id)
+    if equipments:
+        scope["equipment"] = {"$in": equipments}
+
     if scope:
         query_filter = {"$and": [scope, {"$or": or_text_clauses}]}
     else:
@@ -223,7 +429,7 @@ async def _keyword_search(
     try:
         cursor = db[RAG_CHUNKS_COLLECTION].find(
             query_filter,
-            {"_id": 0, "doc_id": 1, "filename": 1, "chunk_index": 1, "text": 1, "scope": 1},
+            {"_id": 0, "doc_id": 1, "filename": 1, "chunk_index": 1, "text": 1, "scope": 1, "equipment": 1},
         ).limit(limit)
         results = await cursor.to_list(length=limit)
 

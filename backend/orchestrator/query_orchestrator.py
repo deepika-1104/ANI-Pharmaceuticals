@@ -317,7 +317,16 @@ class QueryOrchestrator:
 
     def get_last_stream_meta(self, session_id: str) -> dict:
         """Return metadata stored from the last stream() call for this session."""
-        return self._last_stream_meta.get(session_id, {})
+        meta = self._last_stream_meta.get(session_id, {})
+        from rag.retriever import query_understanding_var
+        try:
+            val = query_understanding_var.get()
+            if val and "query_understanding" not in meta:
+                meta = dict(meta)
+                meta["query_understanding"] = val
+        except Exception:
+            pass
+        return meta
 
     # ── Initialisation ────────────────────────────────────────────────────────
 
@@ -412,7 +421,7 @@ class QueryOrchestrator:
             # documents that answer this question directly.
             _fp_vector = await get_query_embedding(resolved_query) if user_id else None
             rag_chunks_fp, source_filenames_fp = await self._fetch_rag_chunks(
-                resolved_query, _fp_vector, user_id, RAG_TOP_K, org_id=org_id
+                resolved_query, _fp_vector, user_id, RAG_TOP_K, org_id=org_id, intent=intent
             )
             if rag_chunks_fp:
                 rag_text = build_rag_context(rag_chunks_fp)
@@ -528,7 +537,7 @@ class QueryOrchestrator:
             # uploaded documents that answer this question directly.
             _fp_vector = await get_query_embedding(resolved_query) if user_id else None
             rag_chunks_fp, source_filenames_fp = await self._fetch_rag_chunks(
-                resolved_query, _fp_vector, user_id, RAG_TOP_K, org_id=org_id
+                resolved_query, _fp_vector, user_id, RAG_TOP_K, org_id=org_id, intent=intent
             )
             if rag_chunks_fp:
                 rag_text = build_rag_context(rag_chunks_fp)
@@ -590,7 +599,7 @@ class QueryOrchestrator:
 
         # Stage 5b: RAG retrieval — fired now, runs in parallel with Stage 5a below
         rag_task = asyncio.ensure_future(
-            self._fetch_rag_chunks(resolved_query, query_vector, user_id, RAG_TOP_K, org_id=org_id)
+            self._fetch_rag_chunks(resolved_query, query_vector, user_id, RAG_TOP_K, org_id=org_id, intent=intent)
         )
 
         # Stage 5: Route by intent
@@ -933,13 +942,13 @@ class QueryOrchestrator:
             if _cached:
                 analytics_results = _cached["analytics_results"]
                 sample_fetched = _cached["sample_fetched"]
-                rag_chunks, source_filenames = await self._fetch_rag_chunks(query, query_vector, user_id, RAG_TOP_K, org_id=org_id)
+                rag_chunks, source_filenames = await self._fetch_rag_chunks(query, query_vector, user_id, RAG_TOP_K, org_id=org_id, intent=intent)
                 logger.info("[CACHE] hit intent=%s key=%s", intent, _cache_key)
             else:
                 analytics_results, sample_fetched, (rag_chunks, source_filenames) = await asyncio.gather(
                     run_analytics(query_meta, selected, self._metadata, self._repo, top_n=query_meta.top_n),
                     self._fetch_sample(query, selected, expanded_kw, query_vector, query_meta),
-                    self._fetch_rag_chunks(query, query_vector, user_id, RAG_TOP_K, org_id=org_id),
+                    self._fetch_rag_chunks(query, query_vector, user_id, RAG_TOP_K, org_id=org_id, intent=intent),
                 )
                 if _cache_key and analytics_results:
                     _cache.set(_cache_key, {"analytics_results": analytics_results, "sample_fetched": sample_fetched})
@@ -1033,7 +1042,7 @@ class QueryOrchestrator:
                     query, selected, expanded_kw, query_vector, page, DATA_QUERY_PAGE_SIZE,
                     query_meta=query_meta,
                 ),
-                self._fetch_rag_chunks(query, query_vector, user_id, RAG_TOP_K, org_id=org_id),
+                self._fetch_rag_chunks(query, query_vector, user_id, RAG_TOP_K, org_id=org_id, intent=intent),
             )
             timings["data_fetch_ms"] = _ms(t5)
 
@@ -1106,13 +1115,13 @@ class QueryOrchestrator:
             if _cached:
                 fetched = _cached["sample_fetched"]
                 summary_agg = _cached["analytics_results"]
-                rag_chunks, source_filenames = await self._fetch_rag_chunks(query, query_vector, user_id, RAG_TOP_K, org_id=org_id)
+                rag_chunks, source_filenames = await self._fetch_rag_chunks(query, query_vector, user_id, RAG_TOP_K, org_id=org_id, intent=intent)
                 logger.info("[CACHE] hit intent=summary key=%s", _cache_key)
             else:
                 fetched, summary_agg, (rag_chunks, source_filenames) = await asyncio.gather(
                     self._fetch_sample(query, selected, expanded_kw, query_vector, query_meta),
                     run_analytics(query_meta, selected, self._metadata, self._repo, top_n=query_meta.top_n),
-                    self._fetch_rag_chunks(query, query_vector, user_id, RAG_TOP_K, org_id=org_id),
+                    self._fetch_rag_chunks(query, query_vector, user_id, RAG_TOP_K, org_id=org_id, intent=intent),
                 )
                 if _cache_key:
                     _cache.set(_cache_key, {"analytics_results": summary_agg, "sample_fetched": fetched})
@@ -1120,12 +1129,12 @@ class QueryOrchestrator:
             summary_agg = {}
             if _cached:
                 fetched = _cached["sample_fetched"]
-                rag_chunks, source_filenames = await self._fetch_rag_chunks(query, query_vector, user_id, RAG_TOP_K, org_id=org_id)
+                rag_chunks, source_filenames = await self._fetch_rag_chunks(query, query_vector, user_id, RAG_TOP_K, org_id=org_id, intent=intent)
                 logger.info("[CACHE] hit intent=%s key=%s", intent, _cache_key)
             else:
                 fetched, (rag_chunks, source_filenames) = await asyncio.gather(
                     self._fetch_sample(query, selected, expanded_kw, query_vector, query_meta),
-                    self._fetch_rag_chunks(query, query_vector, user_id, RAG_TOP_K, org_id=org_id),
+                    self._fetch_rag_chunks(query, query_vector, user_id, RAG_TOP_K, org_id=org_id, intent=intent),
                 )
                 if _cache_key:
                     _cache.set(_cache_key, {"analytics_results": {}, "sample_fetched": fetched})
@@ -1550,6 +1559,7 @@ class QueryOrchestrator:
         user_id: str,
         top_k: int,
         org_id: str = "",
+        intent: Optional[str] = None,
     ) -> tuple[list[dict], list[str]]:
         """
         Stage 5b — retrieve relevant document chunks from rag_chunks collection.
@@ -1560,15 +1570,15 @@ class QueryOrchestrator:
             logger.warning("[RAG] database unavailable — skipping RAG retrieval")
             return [], []
         logger.info(
-            "[RAG] fetching chunks: user=%s org=%s vector=%s query=%r",
-            (user_id[:8] + "...") if user_id else "none", org_id or "none",
+            "[RAG] fetching chunks: user=%s org=%s intent=%s vector=%s query=%r",
+            (user_id[:8] + "...") if user_id else "none", org_id or "none", intent or "none",
             "yes" if query_vector else "no (keyword fallback)",
             query[:60],
         )
         try:
             from rag.retriever import retrieve_chunks
             chunks, filenames = await retrieve_chunks(
-                db, query_vector, query, user_id, top_k, org_id=org_id or None
+                db, query_vector, query, user_id, top_k, org_id=org_id or None, intent=intent
             )
             logger.info(
                 "[RAG] retrieved %d chunks from %d file(s): %s",
