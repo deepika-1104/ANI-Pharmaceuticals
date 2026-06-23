@@ -1,0 +1,48 @@
+# =============================================================================
+#  ANI-VOXA Backend — Python Dependencies
+#
+#  Install:  pip install -r requirements.txt
+#  (The start.sh / start.bat launchers handle this automatically.)
+# =============================================================================
+
+
+# ── Web framework ─────────────────────────────────────────────────────────────
+fastapi==0.115.12
+uvicorn[standard]==0.34.3       # includes httptools + uvloop for performance
+python-multipart==0.0.20        # required for file uploads (UploadFile)
+websockets==15.0.1              # WebSocket streaming endpoint
+
+
+# ── LLM — works with any OpenAI-compatible provider ──────────────────────────
+# Groq · OpenAI · Together · DeepSeek · Anthropic · Gemini · Ollama · Azure
+openai>=1.52.0,<2.0.0
+
+
+# ── Database — async MongoDB via Motor ───────────────────────────────────────
+motor[asyncio]>=3.3.0,<4.0.0
+pymongo>=4.8.0,<5.0.0           # required by motor; also used for ObjectId utilities
+
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+pyjwt>=2.10.0,<3.0.0
+passlib[bcrypt]>=1.7.4,<2.0.0  # bcrypt password hashing
+bcrypt>=3.2.0,<4.0.0            # passlib 1.7.4 is incompatible with bcrypt>=4.0.0
+
+
+# ── Config ────────────────────────────────────────────────────────────────────
+python-dotenv>=1.1.0,<2.0.0
+
+
+# ── Data validation ───────────────────────────────────────────────────────────
+pydantic[email]>=2.12.0,<3.0.0  # [email] installs email-validator, required for EmailStr
+
+
+# ── RAG — document ingestion (PDF / DOCX / images) ───────────────────────────
+# Lazy-imported in rag/extractor.py — only needed if you use document upload.
+pypdf>=4.0.0                    # PDF text extraction
+python-docx>=1.1.0              # DOCX text extraction
+Pillow>=10.0.0                  # image resize before vision API call
+
+
+# ── Storage (optional — only needed when STORAGE_BACKEND=supabase) ───────────
+supabase>=2.9.0,<3.0.0
