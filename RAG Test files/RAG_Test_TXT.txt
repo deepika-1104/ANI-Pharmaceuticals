@@ -1,7 +1,0 @@
-ANI Healthcare RAG Test TXT
-
-Project Code: TXT-ALPHA-7821
-Internal Risk Score: 73.9
-Deployment Zone: Chennai-East-4
-Review Date: 2026-08-14
-Escalation Contact: Dr. Kavya Menon
