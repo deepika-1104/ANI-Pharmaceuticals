@@ -6,7 +6,7 @@ import useAuthStore from './store/useAuthStore';
 import ProtectedRoute from './components/ProtectedRoute';
 import Landing from './pages/Landing';
 import Dashboard from './pages/Dashboard';
-import PharmaCopilotPage from './pages/PharmaCopilotPage';
+import PharmaAIPage from './pages/PharmaAIPage';
 
 export default function App() {
   const loadTheme      = useThemeStore((s) => s.loadTheme);
@@ -62,15 +62,13 @@ export default function App() {
       />
 
       <Routes>
-        {/* Authenticated users land on the new Pharma Copilot page */}
-        <Route path="/" element={isAuthenticated ? <Navigate to="/copilot" replace /> : <Landing />} />
+        <Route path="/" element={isAuthenticated ? <Navigate to="/ai" replace /> : <Landing />} />
 
-        {/* ── New: Pharma Copilot landing experience ── */}
         <Route
-          path="/copilot"
+          path="/ai"
           element={
             <ProtectedRoute>
-              <PharmaCopilotPage />
+              <PharmaAIPage />
             </ProtectedRoute>
           }
         />

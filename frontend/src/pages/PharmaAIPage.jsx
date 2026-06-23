@@ -2,14 +2,14 @@ import React, { useState, useEffect } from 'react';
 import useThemeStore    from '../store/useThemeStore';
 import useChatStore     from '../store/useChatStore';
 import useAuthStore     from '../store/useAuthStore';
-import CopilotHeader    from '../components/copilot/CopilotHeader';
-import DomainSelector   from '../components/copilot/DomainSelector';
-import WelcomeHero      from '../components/copilot/WelcomeHero';
+import AIHeader         from '../components/ai/AIHeader';
+import DomainSelector   from '../components/ai/DomainSelector';
+import WelcomeHero      from '../components/ai/WelcomeHero';
 import ChatWindow       from '../components/ChatWindow';
 import PharmaPlantDashboard from './PharmaPlantDashboard';
-import PackagingDashboard   from '../components/copilot/PackagingDashboard';
-import QualityDashboard     from '../components/copilot/QualityDashboard';
-import LogisticsDashboard   from '../components/copilot/LogisticsDashboard';
+import PackagingDashboard   from '../components/ai/PackagingDashboard';
+import QualityDashboard     from '../components/ai/QualityDashboard';
+import LogisticsDashboard   from '../components/ai/LogisticsDashboard';
 
 const DOMAIN_DASHBOARDS = {
   Production: PharmaPlantDashboard,
@@ -18,7 +18,7 @@ const DOMAIN_DASHBOARDS = {
   Logistics:  LogisticsDashboard,
 };
 
-export default function PharmaCopilotPage() {
+export default function PharmaAIPage() {
   const [selectedDomain, setSelectedDomain] = useState('Production');
 
   const user          = useAuthStore((s) => s.user);
@@ -44,10 +44,10 @@ export default function PharmaCopilotPage() {
     <div
       className="flex flex-col bg-[var(--bg)] transition-colors duration-250"
       style={{ minHeight: '100dvh' }}
-      id="copilot-root"
+      id="ai-root"
     >
       {/* ── Sticky top header ── */}
-      <CopilotHeader selectedDomain={selectedDomain} />
+      <AIHeader selectedDomain={selectedDomain} />
 
       {/* ── Domain selector strip ── */}
       <DomainSelector
@@ -64,7 +64,7 @@ export default function PharmaCopilotPage() {
 
           {/* ── Chat assistant area ── */}
           <div
-            id="copilot-chat-section"
+            id="ai-chat-section"
             className="
               mx-4 sm:mx-6 lg:mx-8
               rounded-2xl overflow-hidden

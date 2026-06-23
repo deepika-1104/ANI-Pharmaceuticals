@@ -13,7 +13,7 @@ const DOMAIN_COLORS = {
   Logistics:  '#f59e0b',
 };
 
-export default function CopilotHeader({ selectedDomain }) {
+export default function AIHeader({ selectedDomain }) {
   const user        = useAuthStore((s) => s.user);
   const logout      = useAuthStore((s) => s.logout);
   const theme       = useThemeStore((s) => s.theme);
@@ -61,7 +61,7 @@ export default function CopilotHeader({ selectedDomain }) {
         <AppLogo size={100} className="flex-shrink-0" />
         <div className="hidden sm:flex flex-col leading-none">
           <span className="text-sm font-extrabold text-[var(--txt)] tracking-tight">ANI-VOXA</span>
-          <span className="text-[10px] text-[var(--txt3)] mt-0.5">Pharma Copilot</span>
+          <span className="text-[10px] text-[var(--txt3)] mt-0.5">AI</span>
         </div>
       </div>
 

@@ -123,7 +123,7 @@ export default function ChatWindow() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isRecording, isStreaming, isLoading]);
 
-  /* ── External query trigger (Pharma Copilot suggestion cards) ── */
+  /* ── External query trigger (AI suggestion cards) ── */
   useEffect(() => {
     const handler = (e) => sendTextAndStream(e.detail.text, 'text');
     window.addEventListener('voxa:suggest-query', handler);

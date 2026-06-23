@@ -49,7 +49,7 @@ export default function WelcomeHero({ domain, user }) {
   const handleSuggestion = (text) => {
     window.dispatchEvent(new CustomEvent('voxa:suggest-query', { detail: { text } }));
     setTimeout(() => {
-      document.getElementById('copilot-chat-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      document.getElementById('ai-chat-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 80);
   };
 
