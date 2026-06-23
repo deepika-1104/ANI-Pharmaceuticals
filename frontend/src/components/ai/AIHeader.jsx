@@ -1,15 +1,22 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { HiOutlineLogout, HiOutlineChevronDown } from 'react-icons/hi';
+import { HiOutlineLogout, HiOutlineChevronDown, HiOutlinePencilAlt, HiOutlineX } from 'react-icons/hi';
 import { toast } from 'react-hot-toast';
 import useAuthStore from '../../store/useAuthStore';
 import useThemeStore from '../../store/useThemeStore';
+import useChatStore from '../../store/useChatStore';
 import AppLogo from '../AppLogo';
 
 export default function AIHeader() {
-  const user        = useAuthStore((s) => s.user);
-  const logout      = useAuthStore((s) => s.logout);
-  const theme       = useThemeStore((s) => s.theme);
-  const toggleTheme = useThemeStore((s) => s.toggleTheme);
+  const user               = useAuthStore((s) => s.user);
+  const logout             = useAuthStore((s) => s.logout);
+  const theme              = useThemeStore((s) => s.theme);
+  const toggleTheme        = useThemeStore((s) => s.toggleTheme);
+  const createConversation    = useChatStore((s) => s.createConversation);
+  const setActiveConversation = useChatStore((s) => s.setActiveConversation);
+  const hasMessages           = useChatStore((s) => {
+    const conv = s.conversations[s.activeConversationId];
+    return !!(conv?.messages?.length);
+  });
 
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef(null);
@@ -57,8 +64,38 @@ export default function AIHeader() {
         <span className="text-[10px] text-[var(--txt3)] mt-0.5">Pharma AI Assistant</span>
       </div>
 
-      {/* ── Right: Theme toggle + Classic dashboard link + Profile ── */}
+      {/* ── Right: New Chat + Theme toggle + Profile ── */}
       <div className="flex items-center gap-2">
+
+        {/* New Chat */}
+        <button
+          onClick={createConversation}
+          title="New Chat"
+          className="
+            w-8 h-8 rounded-lg flex items-center justify-center
+            text-[var(--txt2)] hover:text-[var(--txt)]
+            hover:bg-[var(--brd2)]
+            transition-all duration-200
+          "
+        >
+          <HiOutlinePencilAlt size={17} />
+        </button>
+
+        {/* Close Chat — only visible when the conversation has messages */}
+        {hasMessages && (
+          <button
+            onClick={() => setActiveConversation(null)}
+            title="Close Chat"
+            className="
+              w-8 h-8 rounded-lg flex items-center justify-center
+              text-[var(--txt2)] hover:text-red-400
+              hover:bg-red-500/10
+              transition-all duration-200
+            "
+          >
+            <HiOutlineX size={17} />
+          </button>
+        )}
 
         {/* Theme toggle */}
         <button

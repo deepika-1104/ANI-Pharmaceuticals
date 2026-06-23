@@ -22,7 +22,7 @@ function isNearBottom(el) {
   return el.scrollHeight - el.scrollTop - el.clientHeight < 150;
 }
 
-export default function ChatWindow({ scrollContainerRef }) {
+export default function ChatWindow({ scrollContainerRef, domain = 'Production' }) {
   /* ── DOM refs ── */
   const messagesContainerRef = useRef(null);   // scroll container
   const messagesEndRef       = useRef(null);   // invisible sentinel at the bottom
@@ -334,6 +334,7 @@ export default function ChatWindow({ scrollContainerRef }) {
     return (
       <div className="flex flex-col" id="chat-window">
         <WelcomeScreen
+          domain={domain}
           onQueryClick={handleQueryClick}
           onVoiceClick={handleVoiceToggle}
           onTextSend={handleTextSend}

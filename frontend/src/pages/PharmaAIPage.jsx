@@ -30,14 +30,28 @@ export default function PharmaAIPage() {
   const [selectedDomain, setSelectedDomain] = useState('Production');
 
   const scrollContainerRef = useRef(null);
+  const isMounted          = useRef(false);   // skip domain effect on first render
 
-  const loadTheme     = useThemeStore((s) => s.loadTheme);
-  const loadFromCache = useChatStore((s) => s.loadFromCache);
+  const loadTheme          = useThemeStore((s) => s.loadTheme);
+  const loadFromCache      = useChatStore((s) => s.loadFromCache);
+  const createConversation = useChatStore((s) => s.createConversation);
+  const setActiveConversation = useChatStore((s) => s.setActiveConversation);
 
   useEffect(() => {
     loadTheme();
     loadFromCache();
   }, [loadTheme, loadFromCache]);
+
+  // Each time the user switches to a different domain, start a fresh conversation
+  // so the chat context is always scoped to that domain.
+  useEffect(() => {
+    if (!isMounted.current) {
+      isMounted.current = true;
+      return;
+    }
+    setActiveConversation(null);   // cancel any in-flight stream
+    createConversation();          // open a blank conversation for this domain
+  }, [selectedDomain]);            // eslint-disable-line react-hooks/exhaustive-deps
 
   const DomainDashboard = DOMAIN_DASHBOARDS[selectedDomain] || PharmaPlantDashboard;
 
@@ -52,6 +66,15 @@ export default function PharmaAIPage() {
 
       {/* Mobile-only horizontal domain strip */}
       <div className="md:hidden px-4 py-2.5 border-b border-[var(--brd)] flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden flex-shrink-0">
+        {/* New Chat — mobile */}
+        <button
+          onClick={createConversation}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full flex-shrink-0 text-xs font-semibold transition-all duration-200 select-none border border-dashed border-[var(--brd2)] text-[var(--txt3)] hover:text-[var(--txt)] hover:border-[var(--txt3)]"
+        >
+          <span className="text-sm leading-none">✏️</span>
+          <span>New Chat</span>
+        </button>
+
         {SIDEBAR_ITEMS.map((item) => {
           const isActive = selectedDomain === item.id;
           return (
@@ -108,6 +131,17 @@ export default function PharmaAIPage() {
               );
             })}
           </nav>
+
+          {/* New Chat — desktop */}
+          <div className="flex-shrink-0 p-2 border-t border-[var(--brd)]">
+            <button
+              onClick={createConversation}
+              className="w-full flex items-center gap-2.5 rounded-lg text-left px-3 py-2 text-xs font-semibold text-[var(--txt3)] hover:text-[var(--txt)] hover:bg-[var(--brd2)] border border-dashed border-[var(--brd2)] hover:border-[var(--txt3)] transition-all duration-150"
+            >
+              <span className="text-base leading-none">✏️</span>
+              New Chat
+            </button>
+          </div>
         </aside>
 
         {/* Main content — single scrollbar, everything flows in one column */}
@@ -116,7 +150,7 @@ export default function PharmaAIPage() {
           ref={scrollContainerRef}
         >
           {/* Chat section — no inner scroll; messages flow with the page */}
-          <ChatWindow scrollContainerRef={scrollContainerRef} />
+          <ChatWindow scrollContainerRef={scrollContainerRef} domain={selectedDomain} />
 
           {/* Dashboard below the chat */}
           <div className="border-t border-[var(--brd)]">

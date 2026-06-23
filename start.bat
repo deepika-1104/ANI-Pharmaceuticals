@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 
-title ANI-VOXA — Dev Launcher
+title ANI-VOXA - Dev Launcher
 
 echo.
 echo  ============================================================
