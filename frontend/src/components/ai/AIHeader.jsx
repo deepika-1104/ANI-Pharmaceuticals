@@ -1,28 +1,25 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { HiOutlineLogout, HiOutlineChevronDown, HiOutlineViewGrid } from 'react-icons/hi';
-import { Link } from 'react-router-dom';
+import { HiOutlineLogout, HiOutlineChevronDown, HiOutlinePencilAlt, HiOutlineX } from 'react-icons/hi';
 import { toast } from 'react-hot-toast';
 import useAuthStore from '../../store/useAuthStore';
 import useThemeStore from '../../store/useThemeStore';
+import useChatStore from '../../store/useChatStore';
 import AppLogo from '../AppLogo';
 
-const DOMAIN_COLORS = {
-  Production: '#6366f1',
-  Packaging: '#0ea5e9',
-  Quality:    '#10b981',
-  Logistics:  '#f59e0b',
-};
-
-export default function AIHeader({ selectedDomain }) {
-  const user        = useAuthStore((s) => s.user);
-  const logout      = useAuthStore((s) => s.logout);
-  const theme       = useThemeStore((s) => s.theme);
-  const toggleTheme = useThemeStore((s) => s.toggleTheme);
+export default function AIHeader() {
+  const user               = useAuthStore((s) => s.user);
+  const logout             = useAuthStore((s) => s.logout);
+  const theme              = useThemeStore((s) => s.theme);
+  const toggleTheme        = useThemeStore((s) => s.toggleTheme);
+  const createConversation    = useChatStore((s) => s.createConversation);
+  const setActiveConversation = useChatStore((s) => s.setActiveConversation);
+  const hasMessages           = useChatStore((s) => {
+    const conv = s.conversations[s.activeConversationId];
+    return !!(conv?.messages?.length);
+  });
 
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef(null);
-
-  const domainColor = DOMAIN_COLORS[selectedDomain] || '#6366f1';
 
   useEffect(() => {
     const handler = (e) => {
@@ -56,35 +53,49 @@ export default function AIHeader({ selectedDomain }) {
         after:bg-gradient-to-r after:from-transparent after:via-[var(--brd2)] after:to-transparent
       "
     >
-      {/* ── Left: Logo + brand ── */}
+      {/* ── Left: Logo ── */}
       <div className="flex items-center gap-3 min-w-0">
         <AppLogo size={100} className="flex-shrink-0" />
-        <div className="hidden sm:flex flex-col leading-none">
-          <span className="text-sm font-extrabold text-[var(--txt)] tracking-tight">ANI-VOXA</span>
-          <span className="text-[10px] text-[var(--txt3)] mt-0.5">AI</span>
-        </div>
       </div>
 
-      {/* ── Center: Active domain badge ── */}
-      <div className="flex items-center">
-        <div
-          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold select-none"
-          style={{
-            background: `${domainColor}18`,
-            color:       domainColor,
-            border:      `1.5px solid ${domainColor}40`,
-          }}
-        >
-          <span
-            className="w-1.5 h-1.5 rounded-full animate-pulse"
-            style={{ background: domainColor }}
-          />
-          {selectedDomain}
-        </div>
+      {/* ── Center: Application name ── */}
+      <div className="flex flex-col items-center leading-none select-none">
+        <span className="text-sm font-extrabold text-[var(--txt)] tracking-tight">ANI-VOXA</span>
+        <span className="text-[10px] text-[var(--txt3)] mt-0.5">Pharma AI Assistant</span>
       </div>
 
-      {/* ── Right: Theme toggle + Classic dashboard link + Profile ── */}
+      {/* ── Right: New Chat + Theme toggle + Profile ── */}
       <div className="flex items-center gap-2">
+
+        {/* New Chat */}
+        <button
+          onClick={createConversation}
+          title="New Chat"
+          className="
+            w-8 h-8 rounded-lg flex items-center justify-center
+            text-[var(--txt2)] hover:text-[var(--txt)]
+            hover:bg-[var(--brd2)]
+            transition-all duration-200
+          "
+        >
+          <HiOutlinePencilAlt size={17} />
+        </button>
+
+        {/* Close Chat — only visible when the conversation has messages */}
+        {hasMessages && (
+          <button
+            onClick={() => setActiveConversation(null)}
+            title="Close Chat"
+            className="
+              w-8 h-8 rounded-lg flex items-center justify-center
+              text-[var(--txt2)] hover:text-red-400
+              hover:bg-red-500/10
+              transition-all duration-200
+            "
+          >
+            <HiOutlineX size={17} />
+          </button>
+        )}
 
         {/* Theme toggle */}
         <button
@@ -102,22 +113,6 @@ export default function AIHeader({ selectedDomain }) {
             : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
           }
         </button>
-
-        {/* Link to classic dashboard */}
-        <Link
-          to="/dashboard"
-          className="
-            hidden sm:flex items-center gap-1.5
-            px-3 py-1.5 rounded-lg
-            text-xs text-[var(--txt2)] hover:text-[var(--txt)]
-            hover:bg-[var(--brd2)]
-            transition-all duration-200
-          "
-          title="Classic Dashboard"
-        >
-          <HiOutlineViewGrid size={14} />
-          <span className="font-medium">Classic</span>
-        </Link>
 
         {/* Profile dropdown */}
         <div className="relative" ref={profileRef}>
