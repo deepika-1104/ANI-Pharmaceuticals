@@ -4,6 +4,7 @@ import {
   LineChart, Line, Legend,
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
 } from 'recharts';
+import { useProductionData } from '../../hooks/useProductionData';
 
 // ─── DESIGN TOKENS ───────────────────────────────────────────────────────────
 const T = {
@@ -86,6 +87,42 @@ const UPCOMING = [
   { label: 'CAPA Review Meeting',   note: 'Today 3:00 PM', iconBg: T.red.light,          iconColor: T.red.solid,    urgency: 'high', domain: 'Quality'    },
   { label: 'Carrier Performance',   note: 'Jun 25',         iconBg: T.log.light,          iconColor: T.log.solid,    urgency: 'low',  domain: 'Logistics'  },
 ];
+
+const PROD_LINE_BASE = [
+  { key: 'granulation', label: 'Granulation', color: T.prod.solid, light: T.prod.light },
+  { key: 'compression', label: 'Compression', color: T.pkg.solid,  light: T.pkg.light  },
+  { key: 'coating',     label: 'Coating',     color: T.qlt.solid,  light: T.qlt.light  },
+  { key: 'packaging',   label: 'Packaging',   color: T.log.solid,  light: T.log.light  },
+];
+
+function buildProdLines(prodData) {
+  const areas   = prodData?.today?.areas    ?? {};
+  const total   = prodData?.today?.totalProduced ?? 1;
+  const maintDue = prodData?.today?.activities?.preventive_maintenance_due ?? 0;
+  const onHold  = prodData?.today?.batches?.on_hold ?? 0;
+
+  return PROD_LINE_BASE.map((l, i) => {
+    const units = areas[l.key] ?? 0;
+    const pct   = total > 0 ? ((units / total) * 100).toFixed(1) : '0.0';
+
+    let status, statusColor, statusBg, dotColor;
+    if (i === 2 && maintDue > 3) {
+      status = 'Maintenance'; statusColor = T.amber.text; statusBg = T.amber.light; dotColor = T.amber.solid;
+    } else if (i === 3 && onHold > 2) {
+      status = 'On Hold'; statusColor = T.amber.text; statusBg = T.amber.light; dotColor = T.amber.solid;
+    } else if (units > 0) {
+      status = 'Running'; statusColor = T.green.text; statusBg = T.green.light; dotColor = T.green.solid;
+    } else {
+      status = 'Idle'; statusColor = T.text.secondary; statusBg = T.border; dotColor = T.text.muted;
+    }
+
+    return {
+      ...l, status, statusColor, statusBg, dotColor,
+      sub: `${pct}% of total output`,
+      unitsFormatted: `${(units / 1000).toFixed(1)}K`,
+    };
+  });
+}
 
 // ─── ICON SYSTEM ─────────────────────────────────────────────────────────────
 function Icon({ type, size = 14, color = 'currentColor' }) {
@@ -172,7 +209,8 @@ const CSS = `
   @media (min-width: 1200px) { .ent-kpi { grid-template-columns: repeat(8, 1fr); gap: 10px; } }
 
   .ent-mid { display: grid; grid-template-columns: 1fr; gap: 12px; }
-  @media (min-width: 900px) { .ent-mid { grid-template-columns: 1.8fr 1fr; } }
+  @media (min-width: 900px)  { .ent-mid { grid-template-columns: 1.2fr 1fr; } }
+  @media (min-width: 1280px) { .ent-mid { grid-template-columns: 1.2fr 1fr 1fr; } }
 
   .ent-bot { display: grid; grid-template-columns: 1fr; gap: 12px; }
   @media (min-width: 900px)  { .ent-bot { grid-template-columns: 1fr 1fr; } }
@@ -187,6 +225,9 @@ const CSS = `
 
 // ─── MAIN ────────────────────────────────────────────────────────────────────
 export default function EnterpriseDashboard() {
+  const { data: prodData } = useProductionData();
+  const prodLines = buildProdLines(prodData);
+
   return (
     <div style={{ fontFamily: 'Inter, system-ui, -apple-system, sans-serif', background: T.bg, minHeight: '100%' }}>
       <style>{CSS}</style>
@@ -289,29 +330,74 @@ export default function EnterpriseDashboard() {
             </ResponsiveContainer>
           </Card>
 
-          {/* Domain Health Status */}
+          {/* Production Line Status */}
           <Card style={{ padding: '16px 18px' }}>
-            <SectionTitle>Domain Health Status</SectionTitle>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-              {DOMAIN_STATUS.map((d, i) => (
-                <div key={i} style={{
+            <SectionTitle>Production Line Status</SectionTitle>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {prodLines.map((line) => (
+                <div key={line.key} style={{
                   display: 'flex', alignItems: 'center', gap: 10,
                   padding: '10px 12px', borderRadius: 10,
                   border: `1px solid ${T.border}`,
-                  background: `${d.light}60`,
+                  background: `${line.light}55`,
                 }}>
-                  <span style={{ fontSize: 18, flexShrink: 0 }}>{d.icon}</span>
+                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: line.dotColor, flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: T.text.primary }}>{d.label}</div>
-                    <div style={{ fontSize: 10.5, color: T.text.muted, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.detail}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: T.text.primary }}>{line.label}</div>
+                    <div style={{ fontSize: 10.5, color: T.text.muted, marginTop: 1 }}>{line.sub}</div>
                   </div>
                   <div style={{
                     flexShrink: 0, fontSize: 10, fontWeight: 700,
                     padding: '3px 9px', borderRadius: 999,
-                    background: d.hb, color: d.hc,
-                    border: `1px solid ${d.hc}30`,
+                    background: line.statusBg, color: line.statusColor,
+                    border: `1px solid ${line.statusColor}30`,
                   }}>
-                    {d.health}
+                    {line.status}
+                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: T.text.secondary, minWidth: 44, textAlign: 'right', flexShrink: 0 }}>
+                    {line.unitsFormatted}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Batch status summary */}
+            {prodData?.today && (
+              <>
+                <div style={{ height: 1, background: T.border, margin: '12px 0 10px' }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  {[
+                    { label: 'In Progress', value: prodData.today.batches.in_progress ?? 0, color: T.prod.solid },
+                    { label: 'Completed',   value: prodData.today.batches.completed   ?? 0, color: T.green.solid },
+                    { label: 'On Hold',     value: prodData.today.batches.on_hold     ?? 0, color: T.amber.solid },
+                    { label: 'Pending',     value: prodData.today.batches.pending     ?? 0, color: T.text.muted  },
+                  ].map((s, i) => (
+                    <div key={i} style={{ textAlign: 'center', flex: 1 }}>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: s.color, letterSpacing: '-0.03em' }}>{s.value}</div>
+                      <div style={{ fontSize: 9.5, color: T.text.muted, marginTop: 2, fontWeight: 500 }}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </Card>
+
+          {/* Active Alerts */}
+          <Card style={{ padding: '16px 18px' }}>
+            <SectionTitle action="View All →">Active Alerts</SectionTitle>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {ALERTS.map((a, i) => (
+                <div key={i} style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 9,
+                  padding: '8px 11px', borderRadius: 8,
+                  background: a.pb, border: `1px solid ${a.pc}20`,
+                }}>
+                  <span style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>{a.icon}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 9.5, fontWeight: 700, color: a.pc, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 1 }}>
+                      {a.domain} · {a.priority}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: T.text.secondary, lineHeight: 1.4 }}>{a.msg}</div>
                   </div>
                 </div>
               ))}
@@ -424,22 +510,29 @@ export default function EnterpriseDashboard() {
           {/* Alerts + Upcoming */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-            {/* Active Alerts */}
+            {/* Domain Health Status */}
             <Card style={{ padding: '16px 18px', flex: 1 }}>
-              <SectionTitle action="View All →">Active Alerts</SectionTitle>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-                {ALERTS.map((a, i) => (
+              <SectionTitle>Domain Health Status</SectionTitle>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+                {DOMAIN_STATUS.map((d, i) => (
                   <div key={i} style={{
-                    display: 'flex', alignItems: 'flex-start', gap: 9,
-                    padding: '8px 11px', borderRadius: 8,
-                    background: a.pb, border: `1px solid ${a.pc}20`,
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '10px 12px', borderRadius: 10,
+                    border: `1px solid ${T.border}`,
+                    background: `${d.light}60`,
                   }}>
-                    <span style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>{a.icon}</span>
+                    <span style={{ fontSize: 18, flexShrink: 0 }}>{d.icon}</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 9.5, fontWeight: 700, color: a.pc, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 1 }}>
-                        {a.domain} · {a.priority}
-                      </div>
-                      <div style={{ fontSize: 11.5, color: T.text.secondary, lineHeight: 1.4 }}>{a.msg}</div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: T.text.primary }}>{d.label}</div>
+                      <div style={{ fontSize: 10.5, color: T.text.muted, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.detail}</div>
+                    </div>
+                    <div style={{
+                      flexShrink: 0, fontSize: 10, fontWeight: 700,
+                      padding: '3px 9px', borderRadius: 999,
+                      background: d.hb, color: d.hc,
+                      border: `1px solid ${d.hc}30`,
+                    }}>
+                      {d.health}
                     </div>
                   </div>
                 ))}
