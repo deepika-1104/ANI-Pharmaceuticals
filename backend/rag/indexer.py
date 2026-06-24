@@ -59,6 +59,9 @@ async def index_document(
     scope: str = "user",
     org_id: Optional[str] = None,
     equipment: str = "General",
+    dashboard_scope: str = "enterprise",
+    document_type: str = "manual",
+    source_url: Optional[str] = None,
     unit_tags: Optional[list[str]] = None,
 ) -> dict:
     """
@@ -71,6 +74,9 @@ async def index_document(
     no embedding API calls were made.
     """
     doc_id = make_doc_id(equipment, filename)
+    department_priority = {"quality": 3, "manufacturing": 2, "enterprise": 1}.get(
+        dashboard_scope.lower(), 1
+    )
 
     file_hash = compute_file_hash(file_bytes)
     file_size = len(file_bytes)
@@ -107,6 +113,9 @@ async def index_document(
         scope=scope,
         org_id=org_id,
         equipment=equipment,
+        dashboard_scope=dashboard_scope,
+        document_type=document_type,
+        source_url=source_url,
         metadata={"unit_tags": unit_tags or []},
     )
 
@@ -177,6 +186,14 @@ async def index_document(
                 "scope": scope,
                 "org_id": org_id,
                 "unit_tags": unit_tags or [],
+                "metadata": {
+                    "dashboard_scope": dashboard_scope,
+                    "document_type": document_type,
+                    "department_priority": department_priority,
+                    "source_url": source_url,
+                    "source_file": filename,
+                    "equipment": equipment,
+                },
                 **image_meta,  # empty dict for non-images; full metadata for image chunks
             }
             for i, chunk in enumerate(chunks)
@@ -200,6 +217,9 @@ async def index_document(
             scope=scope,
             org_id=org_id,
             equipment=equipment,
+            dashboard_scope=dashboard_scope,
+            document_type=document_type,
+            source_url=source_url,
             metadata={"unit_tags": unit_tags or []},
         )
 

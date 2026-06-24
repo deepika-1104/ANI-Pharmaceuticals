@@ -240,6 +240,35 @@ async def _retrieve_boosted_candidates(
     return candidates
 
 
+def apply_scope_boost(candidates: list[dict], requested_scope: str) -> list[dict]:
+    """Apply dashboard scope multipliers after retrieval so all plant chunks remain candidates."""
+    multipliers = {"quality": 1.3, "manufacturing": 1.1, "enterprise": 1.0}
+    requested_key = (requested_scope or "enterprise").lower()
+    base_multiplier = multipliers.get(requested_key, 1.0)
+
+    boosted: list[dict] = []
+    for chunk in candidates:
+        metadata = chunk.get("metadata") or {}
+        chunk_scope = (metadata.get("dashboard_scope") or "enterprise").lower()
+        multiplier = multipliers.get(chunk_scope, 1.0)
+        adjusted_score = chunk.get("score", 0.0) * multiplier
+
+        if chunk.get("equipment_matched") and metadata.get("equipment"):
+            adjusted_score += 0.2
+
+        chunk = dict(chunk)
+        chunk["score"] = adjusted_score
+        chunk["boosted_by_scope"] = chunk_scope
+        boosted.append(chunk)
+
+    if requested_key != "enterprise":
+        boosted.sort(key=lambda item: item.get("score", 0.0), reverse=True)
+    else:
+        boosted.sort(key=lambda item: item.get("score", 0.0), reverse=True)
+
+    return boosted
+
+
 async def retrieve_chunks(
     db: motor.motor_asyncio.AsyncIOMotorDatabase,
     query_vector: Optional[list[float]],
@@ -248,6 +277,7 @@ async def retrieve_chunks(
     top_k: int = 5,
     org_id: Optional[str] = None,
     intent: Optional[str] = None,
+    dashboard_scope: str = "enterprise",
 ) -> tuple[list[dict], list[str]]:
     """
     Return (chunks, source_filenames).
@@ -256,6 +286,8 @@ async def retrieve_chunks(
     source_filenames: deduplicated list of filenames that contributed chunks.
 
     Retrieves chunks with intelligent equipment-aware routing and boosting.
+    Scope boosts are applied after retrieval — all plant chunks remain candidates,
+    and ranking is adjusted by the dashboard scope multipliers.
     """
     candidates: list[dict] = []
 
@@ -325,6 +357,7 @@ async def retrieve_chunks(
         return [], []
 
     candidates = _proximity_dedup(candidates)
+    candidates = apply_scope_boost(candidates, dashboard_scope)
     selected   = _mmr_rerank(candidates, top_k)
 
     filenames = list(dict.fromkeys(c["filename"].lower() for c in selected))
@@ -371,6 +404,7 @@ async def _vector_search(
                 "text": 1,
                 "scope": 1,
                 "equipment": 1,
+                "metadata": 1,
                 "score": {"$meta": "vectorSearchScore"},
             }
         },
@@ -429,7 +463,7 @@ async def _keyword_search(
     try:
         cursor = db[RAG_CHUNKS_COLLECTION].find(
             query_filter,
-            {"_id": 0, "doc_id": 1, "filename": 1, "chunk_index": 1, "text": 1, "scope": 1, "equipment": 1},
+            {"_id": 0, "doc_id": 1, "filename": 1, "chunk_index": 1, "text": 1, "scope": 1, "equipment": 1, "metadata": 1},
         ).limit(limit)
         results = await cursor.to_list(length=limit)
 

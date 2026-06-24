@@ -21,6 +21,8 @@ from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from database.mongodb import get_db
+from rag.equipment_registry import delete_equipment_if_empty, list_equipment_by_scope, upsert_equipment
+from rag.path_parser import parse_upload_path
 from services.storage_service import get_storage_service
 
 router = APIRouter()
@@ -41,16 +43,8 @@ _RAG_SUPPORTED = {
 
 
 def _parse_upload_path(raw_path: str) -> tuple[str, str]:
-    """Split an uploaded path into equipment anchor and filename."""
-    normalized_path = raw_path.replace("\\", "/")
-    parts = [p for p in normalized_path.split("/") if p]
-    if len(parts) > 1:
-        equipment = parts[0]
-        filename = "/".join(parts[1:])
-    else:
-        equipment = "General"
-        filename = parts[0] if parts else "document.pdf"
-    return equipment, filename
+    parsed = parse_upload_path(raw_path)
+    return parsed.equipment_name, parsed.filename
 
 
 def _derive_unit_tags(raw_path: str) -> list[str]:
@@ -72,9 +66,13 @@ def _derive_unit_tags(raw_path: str) -> list[str]:
 
 async def _run_indexing(
     user_id: str,
+    storage_key: str,
     filename: str,
     file_bytes: bytes,
-    equipment: str = "General",
+    dashboard_scope: str,
+    equipment_name: str,
+    document_type: str,
+    source_url: Optional[str] = None,
     unit_tags: Optional[list[str]] = None,
 ) -> None:
     """Background task: run the full RAG indexing pipeline for one uploaded file."""
@@ -85,6 +83,14 @@ async def _run_indexing(
     try:
         from config.settings import RAG_CHUNK_SIZE, RAG_CHUNK_OVERLAP
         from rag.indexer import index_document
+        await upsert_equipment(
+            db,
+            dashboard_scope=dashboard_scope,
+            equipment_name=equipment_name,
+            document_type=document_type,
+            filename=filename,
+            source_url=source_url,
+        )
         result = await index_document(
             db,
             user_id,
@@ -92,7 +98,10 @@ async def _run_indexing(
             file_bytes,
             chunk_size=RAG_CHUNK_SIZE,
             chunk_overlap=RAG_CHUNK_OVERLAP,
-            equipment=equipment,
+            equipment=equipment_name,
+            dashboard_scope=dashboard_scope,
+            document_type=document_type,
+            source_url=source_url,
             unit_tags=unit_tags or [],
         )
         logger.info(
@@ -106,6 +115,8 @@ async def _run_indexing(
 class QueryRequest(BaseModel):
     question: str
     equipment: Optional[str] = None
+    dashboard_scope: str = "enterprise"
+    list_equipment_only: bool = False
 
 
 @router.get("/")
@@ -186,14 +197,24 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="Empty file")
 
     raw_path = file.filename or ""
-    equipment, filename = _parse_upload_path(raw_path)
+    parsed = parse_upload_path(raw_path)
     unit_tags = _derive_unit_tags(raw_path)
 
-    key = f"equipment/{equipment}/{filename}"
-    stored = get_storage_service().save_bytes(key, content, file.content_type)
+    stored = get_storage_service().save_bytes(parsed.storage_key, content, file.content_type)
 
     if ext in _RAG_SUPPORTED:
-        background_tasks.add_task(_run_indexing, "", filename, content, equipment, unit_tags)
+        background_tasks.add_task(
+            _run_indexing,
+            "",
+            parsed.storage_key,
+            parsed.filename,
+            content,
+            parsed.dashboard_scope,
+            parsed.equipment_name,
+            parsed.document_type,
+            stored.url,
+            unit_tags,
+        )
         rag_status = "processing"
     else:
         rag_status = "not_supported"
@@ -203,8 +224,11 @@ async def upload_document(
         "status": "ok",
         "rag_status": rag_status,
         "document": {
-            "filename": filename,
-            "equipment": equipment,
+            "filename": parsed.filename,
+            "equipment": parsed.equipment_name,
+            "dashboard_scope": parsed.dashboard_scope,
+            "document_type": parsed.document_type,
+            "storage_key": parsed.storage_key,
             "path": stored.key,
             "url": stored.url,
             "size": stored.size,
@@ -214,48 +238,69 @@ async def upload_document(
     }
 
 
-@router.delete("/{filename:path}")
-async def delete_document(filename: str):
+@router.delete("/{filepath:path}")
+async def delete_document(filepath: str):
     """
     Delete a document from storage and remove all its RAG chunks and metadata.
     """
     db = get_db()
-    if "/" in filename or "\\" in filename:
-        from rag.document_store import parse_equipment_and_filename_from_key
-        equipment, actual_filename = parse_equipment_and_filename_from_key(f"equipment/{filename}")
-    else:
-        from rag.document_store import RAG_DOCUMENTS_COLLECTION
-        actual_filename = filename
-        equipment = "General"
-        if db is not None:
-            doc_rec = await db[RAG_DOCUMENTS_COLLECTION].find_one({"filename": filename})
-            if doc_rec:
-                equipment = doc_rec.get("equipment", "General")
+    parsed = parse_upload_path(filepath)
 
-    key = f"equipment/{equipment}/{actual_filename}"
-
-    # Remove from storage
     storage = get_storage_service()
     try:
-        storage.delete(key)
+        storage.delete(parsed.storage_key)
     except Exception as exc:
-        logger.warning("[DOCUMENTS] storage delete failed for key %s: %s", key, exc)
+        logger.warning("[DOCUMENTS] storage delete failed for key %s: %s", parsed.storage_key, exc)
 
-    # Remove RAG chunks and metadata record
     chunks_deleted = 0
     if db is not None:
         try:
             from rag.indexer import delete_document as rag_delete
-            chunks_deleted = await rag_delete(db, "", actual_filename, equipment=equipment)
+            chunks_deleted = await rag_delete(db, "", parsed.filename, equipment=parsed.equipment_name)
         except Exception as exc:
-            logger.warning("[DOCUMENTS] RAG delete failed for %s: %s", actual_filename, exc)
+            logger.warning("[DOCUMENTS] RAG delete failed for %s: %s", parsed.filename, exc)
+
+    await delete_equipment_if_empty(
+        db,
+        parsed.dashboard_scope,
+        parsed.equipment_name,
+        parsed.filename,
+    )
 
     return {
         "status": "ok",
-        "filename": actual_filename,
-        "equipment": equipment,
+        "filename": parsed.filename,
+        "equipment": parsed.equipment_name,
+        "dashboard_scope": parsed.dashboard_scope,
         "chunks_deleted": chunks_deleted,
     }
+
+
+@router.get("/equipment")
+async def list_all_equipment():
+    db = get_db()
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    equipment = await list_equipment_by_scope(db, None)
+    return {"equipment": equipment, "total": len(equipment)}
+
+
+@router.get("/equipment/manufacturing")
+async def list_manufacturing_equipment():
+    db = get_db()
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    equipment = await list_equipment_by_scope(db, "manufacturing")
+    return {"equipment": equipment, "total": len(equipment), "dashboard_scope": "manufacturing"}
+
+
+@router.get("/equipment/quality")
+async def list_quality_equipment():
+    db = get_db()
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    equipment = await list_equipment_by_scope(db, "quality")
+    return {"equipment": equipment, "total": len(equipment), "dashboard_scope": "quality"}
 
 
 @router.get("/index-status")
@@ -344,6 +389,18 @@ async def query_plant_knowledge(body: QueryRequest):
     if db is None:
         raise HTTPException(status_code=503, detail="Database unavailable")
 
+    if body.list_equipment_only:
+        scope = None if body.dashboard_scope == "enterprise" else body.dashboard_scope
+        equipment_entries = await list_equipment_by_scope(db, scope)
+        lines = [f"- {entry['display_name']} ({entry['dashboard_scope']})" for entry in equipment_entries]
+        answer = "Available instruments:\n" + ("\n".join(lines) if lines else "- None")
+        return {
+            "answer": answer,
+            "sources": equipment_entries,
+            "chunks_used": 0,
+            "disclaimer": "Equipment registry entries only.",
+        }
+
     from config.settings import PLANT_NAME, RAG_TOP_K
     from llm.client import LLMClient
     from orchestrator.semantic_expander import get_query_embedding
@@ -357,14 +414,8 @@ async def query_plant_knowledge(body: QueryRequest):
         "",
         top_k=RAG_TOP_K,
         intent="conversational",
+        dashboard_scope=body.dashboard_scope,
     )
-
-    if body.equipment:
-        equipment_filter = body.equipment.strip().lower()
-        chunks = [
-            chunk for chunk in chunks
-            if (chunk.get("equipment") or "").lower() == equipment_filter
-        ]
 
     if not chunks:
         return {
@@ -387,16 +438,29 @@ async def query_plant_knowledge(body: QueryRequest):
         f"You are answering questions from the plant knowledge base for {PLANT_NAME}. "
         "Use only the provided context. If the context is insufficient, say so plainly. "
         "Do not invent steps, dates, or equipment details. Keep the answer concise and "
-        "reference the source files when helpful."
+        "end every answer with a Sources section. Cite documents as [filename] "
+        "(Equipment: equipment_name) and only cite documents actually used."
     )
     answer = llm.complete([
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"Question: {body.question}\n\nContext:\n" + "\n\n".join(context_blocks)},
     ])
 
+    sources = []
+    for chunk in chunks:
+        metadata = chunk.get("metadata") or {}
+        sources.append({
+            "filename": chunk.get("filename"),
+            "equipment": chunk.get("equipment"),
+            "dashboard_scope": metadata.get("dashboard_scope", "enterprise"),
+            "document_type": metadata.get("document_type", "manual"),
+            "source_url": metadata.get("source_url"),
+            "department_priority": metadata.get("department_priority"),
+        })
+
     return {
         "answer": answer,
-        "sources": filenames,
+        "sources": sources,
         "chunks_used": len(chunks),
         "equipment": body.equipment,
     }

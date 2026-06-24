@@ -70,6 +70,12 @@ async def _startup(app: FastAPI) -> None:
         except Exception as exc:
             logger.warning(f"RAG index init deferred: {exc}")
 
+        try:
+            from rag.equipment_registry import init_equipment_indexes
+            await init_equipment_indexes(db)
+        except Exception as exc:
+            logger.warning(f"Equipment index init deferred: {exc}")
+
         # 3. Orchestrator
         try:
             orchestrator = get_orchestrator()

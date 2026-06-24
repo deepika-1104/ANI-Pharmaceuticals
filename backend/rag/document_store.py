@@ -123,6 +123,9 @@ async def upsert_document_record(
     scope: str = "user",
     org_id: Optional[str] = None,
     equipment: str = "General",
+    dashboard_scope: str = "enterprise",
+    document_type: str = "manual",
+    source_url: Optional[str] = None,
 ) -> None:
     """
     Full upsert — $set overwrites ALL mutable fields so no stale values survive
@@ -130,6 +133,13 @@ async def upsert_document_record(
     created_at is $setOnInsert only so it is never overwritten.
     """
     now = datetime.now(timezone.utc)
+    metadata_payload = dict(metadata or {})
+    metadata_payload.update({
+        "dashboard_scope": dashboard_scope,
+        "document_type": document_type,
+        "source_url": source_url,
+    })
+
     await db[RAG_DOCUMENTS_COLLECTION].update_one(
         {"doc_id": doc_id},
         {
@@ -147,9 +157,12 @@ async def upsert_document_record(
                 "error_message": error_message,
                 "indexed_at": indexed_at,
                 "partial_index": partial_index,
-                "metadata": metadata or {},
+                "metadata": metadata_payload,
                 "scope": scope,
                 "org_id": org_id,
+                "dashboard_scope": dashboard_scope,
+                "document_type": document_type,
+                "source_url": source_url,
                 "updated_at": now,
             },
             "$setOnInsert": {"created_at": now},
