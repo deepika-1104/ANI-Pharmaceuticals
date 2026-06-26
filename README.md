@@ -7,8 +7,8 @@ An AI-powered plant operations platform for ANI Pharmaceuticals. Voxa is a voice
 ## Features
 
 ### AI Assistant (Voxa)
-- **LLM-powered chat** scoped to the active domain (Production or Quality)
-- **Voice input** via Whisper-compatible speech-to-text
+- **LLM-powered chat** scoped to the active domain (Production, Quality, Packaging, Logistics, or Enterprise)
+- **Voice input** via Whisper-compatible speech-to-text, with smart silence detection — auto-stops 3 s after recording starts if no speech is detected, and 5 s after the user goes quiet; silent recordings are discarded before reaching Whisper
 - **Strict data grounding** — all answers are sourced exclusively from live plant data; no hallucinations
 - **Provider-agnostic LLM** — switch between Groq, OpenAI, Together, DeepSeek, Anthropic, Gemini, Ollama, or Azure via a single env variable
 - **RAG** (Retrieval-Augmented Generation) for uploaded documents
@@ -30,7 +30,7 @@ The frontend provides five domain dashboards, each with AI chat context scoped t
 - **Dashboard API** — `/api/production-dashboard/summary` and `/api/quality-dashboard/summary` return aggregated metrics (today, yesterday, last 9 days, shift data, parameter ranges)
 - **Automatic data ingestion** — CSV/JSON files in `data/` are loaded into MongoDB on startup (idempotent)
 - **Response cache** — identical queries served from an in-process cache (default 4-hour TTL)
-- **JWT auth** — access token (60 min) + refresh token (1 day / 30 days with "remember me")
+- **JWT auth** — access token (60 min) + refresh token (1 day / 30 days with "remember me"); expiry decoded locally on the client to avoid unnecessary 401s
 - **Full async** — Motor (async MongoDB driver) + uvicorn
 
 ---
@@ -40,41 +40,79 @@ The frontend provides five domain dashboards, each with AI chat context scoped t
 ```
 ANI-Pharmaceuticals/
 ├── backend/
-│   ├── main.py                   # FastAPI app entry point
-│   ├── config/settings.py        # All env-var based configuration
+│   ├── main.py                        # FastAPI app entry point
+│   ├── dependencies.py                # Shared FastAPI dependencies
+│   ├── config/settings.py             # All env-var based configuration
+│   ├── auth/
+│   │   ├── jwt_handler.py             # JWT encode/decode, token creation
+│   │   ├── password_utils.py          # Bcrypt helpers
+│   │   └── dependencies.py            # FastAPI auth dependencies
 │   ├── routers/
-│   │   ├── auth.py               # Login, signup, refresh
-│   │   ├── chat.py               # Streaming chat endpoint
-│   │   ├── dashboard.py          # Production & quality dashboard APIs
-│   │   ├── documents.py          # RAG document upload/management
+│   │   ├── auth.py                    # Login, signup, refresh
+│   │   ├── chat.py                    # Streaming chat endpoint
+│   │   ├── dashboard.py               # Production & quality dashboard APIs
+│   │   ├── documents.py               # RAG document upload/management
 │   │   ├── health.py
 │   │   ├── history.py
 │   │   ├── query.py
-│   │   └── speech.py             # STT transcription
+│   │   └── speech.py                  # STT transcription
 │   ├── orchestrator/
-│   │   ├── query_orchestrator.py # Main pipeline coordinator
+│   │   ├── query_orchestrator.py      # Main pipeline coordinator
 │   │   ├── intent_classifier.py
 │   │   ├── collection_selector.py
 │   │   ├── semantic_expander.py
 │   │   ├── query_normalizer.py
 │   │   ├── context_builder.py
 │   │   ├── analytics_executor.py
-│   │   └── followup_engine.py
-│   ├── data_ingestion/loader.py  # CSV/JSON → MongoDB ingestion
+│   │   ├── followup_engine.py
+│   │   ├── reference_resolver.py
+│   │   ├── response_composer.py
+│   │   ├── retrieval_validator.py
+│   │   ├── session_context.py
+│   │   └── source_selector.py
+│   ├── llm/
+│   │   ├── client.py                  # Provider-agnostic LLM client
+│   │   └── token_manager.py           # Token counting / budget tracking
+│   ├── services/
+│   │   ├── chat_service.py
+│   │   ├── llm_service.py
+│   │   ├── memory_service.py
+│   │   ├── response_cache.py          # In-process query-response cache
+│   │   ├── session_service.py
+│   │   ├── storage_service.py         # Local / Supabase file storage
+│   │   ├── stt_service.py             # Speech-to-text via Whisper
+│   │   └── user_service.py
+│   ├── rag/
+│   │   ├── chunker.py
+│   │   ├── embedder.py
+│   │   ├── indexer.py
+│   │   ├── retriever.py
+│   │   ├── document_store.py
+│   │   ├── extractor.py               # PDF / docx text extraction
+│   │   └── schemas.py
 │   ├── prompts/
+│   │   ├── base.py
 │   │   ├── builder.py
-│   │   └── intents.py
-│   ├── rag/                      # Document chunking & retrieval
+│   │   ├── intents.py                 # Scoped fast-path & collection maps
+│   │   ├── suffixes.py
+│   │   └── vision.py
+│   ├── repositories/
+│   │   └── generic_repository.py      # MongoDB CRUD helpers
+│   ├── data_ingestion/loader.py       # CSV/JSON → MongoDB ingestion
 │   ├── database/mongodb.py
 │   ├── models/
-│   ├── services/
+│   │   ├── requests.py
+│   │   └── responses.py
+│   ├── utils/helpers.py
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx               # Root — routing, auth guard, theme
+│   │   ├── main.jsx
+│   │   ├── App.jsx                    # Root — routing, auth guard, theme
+│   │   ├── index.css
 │   │   ├── pages/
-│   │   │   ├── Landing.jsx       # Login / signup
-│   │   │   ├── PharmaAIPage.jsx  # Main app shell with domain sidebar
+│   │   │   ├── Landing.jsx            # Login / signup
+│   │   │   ├── PharmaAIPage.jsx       # Main app shell with domain sidebar
 │   │   │   ├── PharmaPlantDashboard.jsx  # Production dashboard
 │   │   │   └── Dashboard.jsx
 │   │   ├── components/
@@ -87,19 +125,42 @@ ANI-Pharmaceuticals/
 │   │   │   │   ├── DomainSelector.jsx
 │   │   │   │   └── WelcomeHero.jsx
 │   │   │   ├── ChatWindow.jsx
+│   │   │   ├── MessageBubble.jsx
 │   │   │   ├── Sidebar.jsx
-│   │   │   └── VoiceButton.jsx
+│   │   │   ├── VoiceButton.jsx
+│   │   │   ├── AudioVisualizer.jsx
+│   │   │   ├── DocumentUpload.jsx
+│   │   │   ├── TextInput.jsx
+│   │   │   ├── Header.jsx
+│   │   │   ├── WelcomeScreen.jsx
+│   │   │   ├── AppLogo.jsx
+│   │   │   ├── UserAvatar.jsx
+│   │   │   ├── ConfirmModal.jsx
+│   │   │   ├── CustomDropdown.jsx
+│   │   │   ├── MedicineManager.jsx
+│   │   │   ├── DynamicResponseTemplate.jsx
+│   │   │   ├── PredefinedResponseTemplate.jsx
+│   │   │   └── ProtectedRoute.jsx
 │   │   ├── hooks/
-│   │   │   ├── useProductionData.js  # Fetches /api/production-dashboard/summary
-│   │   │   └── useQualityData.js     # Fetches /api/quality-dashboard/summary
+│   │   │   ├── useVoiceRecorder.js    # MediaRecorder + VAD + silence detection
+│   │   │   ├── useProductionData.js   # Fetches /api/production-dashboard/summary
+│   │   │   ├── useQualityData.js      # Fetches /api/quality-dashboard/summary
+│   │   │   └── useAppStatus.js
 │   │   ├── store/
 │   │   │   ├── useChatStore.js
 │   │   │   ├── useAuthStore.js
-│   │   │   └── useThemeStore.js
-│   │   └── services/api.js
-├── data/                         # CSV/JSON files auto-ingested on startup
-├── render.yaml                   # Render deployment config
-├── start.bat / start.sh          # Local dev launchers
+│   │   │   ├── useThemeStore.js
+│   │   │   ├── useVoiceStore.js
+│   │   │   └── useUIStore.js
+│   │   ├── services/
+│   │   │   ├── api.js                 # REST + WebSocket client
+│   │   │   └── cache.js
+│   │   └── utils/
+│   │       ├── themeTokens.js         # Centralized light/dark color tokens
+│   │       └── validation.js
+├── data/                              # CSV/JSON files auto-ingested on startup
+├── render.yaml                        # Render deployment config
+├── start.bat / start.sh               # Local dev launchers
 └── runtime.txt
 ```
 
@@ -226,7 +287,7 @@ Set the secret env vars (`LLM_API_KEY`, `MONGO_URI`, `JWT_SECRET`, etc.) in the 
 - Python 3.10+, FastAPI, uvicorn
 - Motor (async MongoDB driver)
 - python-jose (JWT)
-- openai-compatible SDK (provider-agnostic LLM calls)
+- Provider-agnostic LLM client (`llm/client.py`) — wraps Groq, OpenAI, Anthropic, Gemini, Together, DeepSeek, Ollama, Azure
 
 **Frontend**
 - React 18, Vite
