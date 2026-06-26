@@ -259,17 +259,17 @@ function DocList({ documents, loading, deleting, onDelete, emptyLabel, emptyHint
 
         {onDelete && (
           <button
-            disabled={deleting === doc.filename}
+            disabled={deleting === (doc.path || doc.filename)}
             style={{
               width: 26, height: 26, display: 'flex', alignItems: 'center',
               justifyContent: 'center', borderRadius: 6, border: 'none',
               background: 'transparent', color: 'var(--sb-txt3)',
-              cursor: deleting === doc.filename ? 'default' : 'pointer',
-              flexShrink: 0, opacity: deleting === doc.filename ? 0.4 : 1,
+              cursor: deleting === (doc.path || doc.filename) ? 'default' : 'pointer',
+              flexShrink: 0, opacity: deleting === (doc.path || doc.filename) ? 0.4 : 1,
             }}
             onMouseEnter={e => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.background = 'rgba(239,68,68,0.12)'; }}
             onMouseLeave={e => { e.currentTarget.style.color = 'var(--sb-txt3)'; e.currentTarget.style.background = 'transparent'; }}
-            onClick={() => onDelete(doc.filename)}
+            onClick={() => onDelete(doc.path || doc.filename)}
             title="Remove document"
           >
             <HiOutlineTrash size={13} />
