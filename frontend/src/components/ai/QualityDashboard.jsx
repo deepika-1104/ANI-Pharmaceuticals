@@ -100,7 +100,7 @@ function ChartTip({ active, payload, label }) {
 const CSS = `
   .qlt-kpi  { display:grid; grid-template-columns:repeat(2,1fr); gap:10px }
   @media(min-width:640px) { .qlt-kpi { grid-template-columns:repeat(4,1fr) } }
-  .qlt-main { display:grid; grid-template-columns:1fr; gap:12px; flex:1; min-height:0 }
+  .qlt-main { display:grid; grid-template-columns:1fr; gap:12px; }
   @media(min-width:768px) { .qlt-main { grid-template-columns:1fr 1fr } }
   @media(min-width:1280px){ .qlt-main { grid-template-columns:1fr 1.8fr 1.3fr } }
   .qlt-kpi-val { font-size:22px }
@@ -215,7 +215,7 @@ export default function QualityDashboard() {
         </div>
       </div>
 
-      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
+      <div style={{ padding: '12px 14px 25px', display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0, overflowY: 'auto' }}>
 
         {/* KPI row */}
         <div className="qlt-kpi">
@@ -246,8 +246,8 @@ export default function QualityDashboard() {
         <div className="qlt-main">
 
           {/* Deviation by Severity + Upcoming Audits stacked in one grid cell */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: '100%' }}>
-            <Card style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', flex: 1 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <Card style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column' }}>
               <SectionTitle>Deviation by Severity</SectionTitle>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {deviations.map((d) => (
@@ -268,7 +268,7 @@ export default function QualityDashboard() {
             </Card>
 
             {upcomingAudits.length > 0 && (
-              <Card style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', flex: 1 }}>
+              <Card style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column' }}>
                 <SectionTitle>Upcoming Audits</SectionTitle>
                 {upcomingAudits.map((a) => (
                   <div key={a.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--brd)' }}>
@@ -284,10 +284,10 @@ export default function QualityDashboard() {
           </div>
 
           {/* Pass/Fail trend */}
-          <Card style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', height: '100%', minHeight: 260 }}>
+          <Card style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column' }}>
             <SectionTitle>Inspection Score Trend (7 Days)</SectionTitle>
             {trendData.length > 0 ? (
-              <div style={{ flex: 1, minHeight: 180 }}>
+              <div style={{ height: 220, display: 'flex', flexDirection: 'column', flex: 1, justifyContent: 'center' }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={trendData} barCategoryGap="22%" barGap={3} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
                     <XAxis dataKey="day" tick={{ fontSize: 10, fill: 'var(--txt3)' }} axisLine={false} tickLine={false} />
@@ -299,7 +299,7 @@ export default function QualityDashboard() {
                 </ResponsiveContainer>
               </div>
             ) : (
-              <div style={{ flex: 1, minHeight: 180, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--txt3)', fontSize: 13 }}>No trend data available</div>
+              <div style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--txt3)', fontSize: 13 }}>No trend data available</div>
             )}
             <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 8, flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -314,10 +314,11 @@ export default function QualityDashboard() {
           </Card>
 
           {/* Recent inspections */}
-          <Card style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', height: '100%', minHeight: 200, overflow: 'hidden' }}>
+          <Card style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', height: '100%' }}>
             <SectionTitle>Recent Inspections</SectionTitle>
             {recent.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 0, flex: 1, overflow: 'auto' }}>
+              <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
+                <div style={{ position: 'absolute', inset: 0, overflowY: 'auto', paddingRight: 4, display: 'flex', flexDirection: 'column' }}>
                 {recent.map((r, i) => {
                   const rs = resultStyle(r.inspection_result, T);
                   return (
@@ -333,6 +334,7 @@ export default function QualityDashboard() {
                     </div>
                   );
                 })}
+                </div>
               </div>
             ) : (
               <div style={{ color: 'var(--txt3)', fontSize: 13 }}>No recent inspection records</div>

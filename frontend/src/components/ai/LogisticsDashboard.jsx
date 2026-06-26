@@ -73,7 +73,7 @@ function ChartTip({ active, payload, label, T }) {
 const CSS = `
   .log-kpi  { display:grid; grid-template-columns:repeat(2,1fr); gap:10px }
   @media(min-width:640px) { .log-kpi { grid-template-columns:repeat(4,1fr) } }
-  .log-main { display:grid; grid-template-columns:1fr; gap:12px; flex:1; min-height:0 }
+  .log-main { display:grid; grid-template-columns:1fr; gap:12px; }
   @media(min-width:768px) { .log-main { grid-template-columns:1fr 1fr } }
   @media(min-width:1280px){ .log-main { grid-template-columns:1fr 1.4fr 1.8fr } }
   .log-kpi-val { font-size:22px }
@@ -133,7 +133,7 @@ export default function LogisticsDashboard() {
         <div style={{ fontSize: 10.5, color: T.green.text, background: T.green.light, padding: '4px 10px', borderRadius: 20, fontWeight: 600 }}>● Live</div>
       </div>
 
-      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
+      <div style={{ padding: '12px 14px 25px', display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0, overflowY: 'auto' }}>
 
         {/* KPI row */}
         <div className="log-kpi">
@@ -164,7 +164,7 @@ export default function LogisticsDashboard() {
         <div className="log-main">
 
           {/* Shipment status */}
-          <Card style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <Card style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column' }}>
             <SectionTitle>Shipment Status</SectionTitle>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {SHIPMENT_STATUS.map((s) => (

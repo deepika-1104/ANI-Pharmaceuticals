@@ -81,7 +81,7 @@ function CustomTooltip({ active, payload, label, T }) {
 const CSS = `
   .pkg-kpi  { display:grid; grid-template-columns:repeat(2,1fr); gap:10px }
   @media(min-width:640px) { .pkg-kpi { grid-template-columns:repeat(4,1fr) } }
-  .pkg-main { display:grid; grid-template-columns:1fr; gap:12px; flex:1; min-height:0 }
+  .pkg-main { display:grid; grid-template-columns:1fr; gap:12px; }
   @media(min-width:768px) { .pkg-main { grid-template-columns:1fr 1fr } }
   @media(min-width:1280px){ .pkg-main { grid-template-columns:1.2fr 1fr 1.5fr } }
   .pkg-kpi-val { font-size:22px }
@@ -122,6 +122,12 @@ export default function PackagingDashboard() {
     { order: 'PKG-2024-010', product: 'Diclofenac 50mg Gel',       qty: '3,500',  due: 'Jun 28',        status: 'Scheduled',  color: 'var(--txt2)', bg: 'var(--brd2)' },
   ];
 
+  const RECENT_ALERTS = [
+    { time: '10:42 AM', msg: 'Line C pressure drop detected. Maintenance notified.', priority: 'High', color: T.red.solid, bg: T.red.light },
+    { time: '09:15 AM', msg: 'Material shortage warning for Packaging Line B.', priority: 'Medium', color: T.amber.solid, bg: T.amber.light },
+    { time: '08:05 AM', msg: 'Routine maintenance completed on Line A.', priority: 'Low', color: T.blue.solid, bg: T.blue.light },
+  ];
+
   return (
     <div style={{ fontFamily: 'Inter, system-ui, sans-serif', background: 'var(--bg)', height: '100%', display: 'flex', flexDirection: 'column' }}>
       <style>{CSS}</style>
@@ -140,7 +146,7 @@ export default function PackagingDashboard() {
         <div style={{ fontSize: 10.5, color: T.green.text, background: T.green.light, padding: '4px 10px', borderRadius: 20, fontWeight: 600 }}>● Live</div>
       </div>
 
-      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
+      <div style={{ padding: '12px 14px 25px', display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0, overflowY: 'auto' }}>
 
         {/* KPI row */}
         <div className="pkg-kpi">
@@ -190,20 +196,37 @@ export default function PackagingDashboard() {
             </div>
           </Card>
 
-          {/* Hourly output chart */}
-          <Card style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', height: '100%', minHeight: 240 }}>
-            <SectionTitle>Hourly Output (Today)</SectionTitle>
-            <div style={{ flex: 1, minHeight: 160 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={HOURLY_DATA} barCategoryGap="25%" margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
-                  <XAxis dataKey="hour" tick={{ fontSize: 10, fill: 'var(--txt3)' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: 'var(--txt3)' }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v/1000).toFixed(1)}k`} />
-                  <Tooltip content={<CustomTooltip T={T} />} cursor={{ fill: 'rgba(128,128,128,0.06)', radius: [4,4,0,0] }} />
-                  <Bar dataKey="packages" fill={T.blue.solid} radius={[4,4,0,0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
+          {/* Middle Column: Hourly output + Recent Alerts */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%', overflow: 'hidden' }}>
+            <Card style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+              <SectionTitle>Hourly Output (Today)</SectionTitle>
+              <div style={{ flex: 1, minHeight: 0 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={HOURLY_DATA} barCategoryGap="25%" margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
+                    <XAxis dataKey="hour" tick={{ fontSize: 10, fill: 'var(--txt3)' }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: 'var(--txt3)' }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v/1000).toFixed(1)}k`} />
+                    <Tooltip content={<CustomTooltip T={T} />} cursor={{ fill: 'rgba(128,128,128,0.06)', radius: [4,4,0,0] }} />
+                    <Bar dataKey="packages" fill={T.blue.solid} radius={[4,4,0,0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </Card>
+
+            <Card style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              <SectionTitle>Recent Alerts</SectionTitle>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, overflow: 'auto' }}>
+                {RECENT_ALERTS.map((a, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px', borderRadius: 8, background: a.bg, border: `1px solid ${a.color}30` }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: a.color, marginTop: 4, flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 11, color: 'var(--txt)', lineHeight: 1.4 }}>{a.msg}</div>
+                      <div style={{ fontSize: 9.5, color: a.color, fontWeight: 700, marginTop: 4 }}>{a.priority} · {a.time}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
 
           {/* Pending orders */}
           <Card style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', height: '100%', minHeight: 200, overflow: 'hidden' }}>
