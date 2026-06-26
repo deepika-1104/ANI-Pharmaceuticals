@@ -6,7 +6,7 @@ import {
   getMe,
   resetPassword as resetPasswordApi,
   logoutApi,
-  logoutAllApi,
+  // logoutAllApi,
   refreshTokenApi,
   warmupWebSocket,
 } from '../services/api';
@@ -77,10 +77,10 @@ const useAuthStore = create(
       },
 
       // ── Logout all devices ─────────────────────────────────────────────────
-      logoutAll: async () => {
-        try { await logoutAllApi(); } catch { /* ignore */ }
-        get()._clearAuthState();
-      },
+      // logoutAll: async () => {
+      //   try { await logoutAllApi(); } catch { /* ignore */ }
+      //   get()._clearAuthState();
+      // },
 
       // ── Refresh access token ───────────────────────────────────────────────
       refresh: async () => {

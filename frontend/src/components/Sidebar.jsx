@@ -13,7 +13,7 @@ import UserAvatar from './UserAvatar';
 import DocumentUpload from './DocumentUpload';
 // import MedicineManager from './MedicineManager';
 import AppLogo from './AppLogo';
-import { clearServerCache } from '../services/api';
+// import { clearServerCache } from '../services/api';
 
 export default function Sidebar({ isOpen, onClose, onNavigateToChat }) {
   /* ── Store selectors ── */
@@ -117,17 +117,17 @@ export default function Sidebar({ isOpen, onClose, onNavigateToChat }) {
   };
 
   /* Clear server-side DB result cache (admin only) */
-  const handleClearCache = async () => {
-    setClearingCache(true);
-    try {
-      const result = await clearServerCache();
-      toast.success(`Cache cleared — ${result.entries_removed} entries removed`);
-    } catch {
-      toast.error('Failed to clear cache');
-    } finally {
-      setClearingCache(false);
-    }
-  };
+  // const handleClearCache = async () => {
+  //   setClearingCache(true);
+  //   try {
+  //     const result = await clearServerCache();
+  //     toast.success(`Cache cleared — ${result.entries_removed} entries removed`);
+  //   } catch {
+  //     toast.error('Failed to clear cache');
+  //   } finally {
+  //     setClearingCache(false);
+  //   }
+  // };
 
 
 

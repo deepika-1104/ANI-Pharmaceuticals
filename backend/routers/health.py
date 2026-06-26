@@ -32,33 +32,33 @@ async def health(request: Request):
     }
 
 
-@router.post("/cache/clear")
-async def cache_clear(admin: dict = Depends(_require_admin)):
-    """Flush the DB result cache. Requires role: admin."""
-    cache = get_db_cache()
-    removed = cache.size
-    cache.clear()
-    logger.info("[CACHE] flushed by admin=%s — removed %d entries", admin.get("id"), removed)
-    return {"cleared": True, "entries_removed": removed}
+# @router.post("/cache/clear")
+# async def cache_clear(admin: dict = Depends(_require_admin)):
+#     """Flush the DB result cache. Requires role: admin."""
+#     cache = get_db_cache()
+#     removed = cache.size
+#     cache.clear()
+#     logger.info("[CACHE] flushed by admin=%s — removed %d entries", admin.get("id"), removed)
+#     return {"cleared": True, "entries_removed": removed}
 
 
-@router.get("/health/detailed")
-async def health_detailed():
-    """Full health check — includes LLM and database status."""
-    llm = check_llm_health()
-    db_ok = is_connected()
-    return {
-        "status": "healthy" if db_ok else "degraded",
-        "version": "2.0.0",
-        "services": {
-            "llm": llm,
-            "database": {
-                "status": "connected" if db_ok else "disconnected",
-            },
-            "stt": {
-                "available": STT_AVAILABLE,
-                "provider": LLM_PROVIDER,
-                "api_key_set": bool(LLM_API_KEY),
-            },
-        },
-    }
+# @router.get("/health/detailed")
+# async def health_detailed():
+#     """Full health check — includes LLM and database status."""
+#     llm = check_llm_health()
+#     db_ok = is_connected()
+#     return {
+#         "status": "healthy" if db_ok else "degraded",
+#         "version": "2.0.0",
+#         "services": {
+#             "llm": llm,
+#             "database": {
+#                 "status": "connected" if db_ok else "disconnected",
+#             },
+#             "stt": {
+#                 "available": STT_AVAILABLE,
+#                 "provider": LLM_PROVIDER,
+#                 "api_key_set": bool(LLM_API_KEY),
+#             },
+#         },
+#     }

@@ -178,11 +178,11 @@ async def logout(body: RefreshRequest):
     return {"message": "Logged out"}
 
 
-@router.post("/logout-all")
-async def logout_all(current_user: dict = Depends(get_current_user)):
-    """Revoke all active sessions for the current user (logout everywhere)."""
-    await session_service.revoke_all_user_sessions(current_user["id"])
-    return {"message": "Logged out from all devices"}
+# @router.post("/logout-all")
+# async def logout_all(current_user: dict = Depends(get_current_user)):
+#     """Revoke all active sessions for the current user (logout everywhere)."""
+#     await session_service.revoke_all_user_sessions(current_user["id"])
+#     return {"message": "Logged out from all devices"}
 
 
 @router.post("/reset-password")
@@ -215,36 +215,36 @@ async def reset_password(body: PasswordResetRequest):
     return {"message": "Password updated. Please log in again."}
 
 
-@router.post("/admin/assign-org")
-async def assign_org(
-    body: AssignOrgRequest,
-    admin_user: dict = Depends(get_admin_user),
-):
-    """
-    Assign a user to an org and optionally grant admin rights.
-    Caller must be an admin; they can only assign users to their own org.
-
-    Bootstrap note: the very first admin must be set directly in MongoDB:
-      db.users.updateOne({email: "..."}, {$set: {org_id: "your-org", is_admin: true}})
-    After that, all subsequent assignments go through this endpoint.
-    """
-    if body.org_id != admin_user["org_id"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admins can only assign users to their own organisation",
-        )
-    await user_service.set_user_org(
-        user_id=body.target_user_id,
-        org_id=body.org_id,
-        is_admin=body.is_admin,
-    )
-    logger.info(
-        "Org assignment: target=%s org=%s is_admin=%s by_admin=%s",
-        body.target_user_id, body.org_id, body.is_admin, admin_user.get("id"),
-    )
-    return {
-        "status": "ok",
-        "target_user_id": body.target_user_id,
-        "org_id": body.org_id,
-        "is_admin": body.is_admin,
-    }
+# @router.post("/admin/assign-org")
+# async def assign_org(
+#     body: AssignOrgRequest,
+#     admin_user: dict = Depends(get_admin_user),
+# ):
+#     """
+#     Assign a user to an org and optionally grant admin rights.
+#     Caller must be an admin; they can only assign users to their own org.
+#
+#     Bootstrap note: the very first admin must be set directly in MongoDB:
+#       db.users.updateOne({email: "..."}, {$set: {org_id: "your-org", is_admin: true}})
+#     After that, all subsequent assignments go through this endpoint.
+#     """
+#     if body.org_id != admin_user["org_id"]:
+#         raise HTTPException(
+#             status_code=status.HTTP_403_FORBIDDEN,
+#             detail="Admins can only assign users to their own organisation",
+#         )
+#     await user_service.set_user_org(
+#         user_id=body.target_user_id,
+#         org_id=body.org_id,
+#         is_admin=body.is_admin,
+#     )
+#     logger.info(
+#         "Org assignment: target=%s org=%s is_admin=%s by_admin=%s",
+#         body.target_user_id, body.org_id, body.is_admin, admin_user.get("id"),
+#     )
+#     return {
+#         "status": "ok",
+#         "target_user_id": body.target_user_id,
+#         "org_id": body.org_id,
+#         "is_admin": body.is_admin,
+#     }

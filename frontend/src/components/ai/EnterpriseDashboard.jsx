@@ -9,16 +9,7 @@ import { useQualityData } from '../../hooks/useQualityData';
 import useThemeStore from '../../store/useThemeStore';
 import { getThemeTokens } from '../../utils/themeTokens';
 
-// ─── STATIC DATA (no T references) ───────────────────────────────────────────
-const SCORECARD = [
-  { metric: 'Efficiency',  Production: 92, Packaging: 94, Quality: 96, Logistics: 88 },
-  { metric: 'Quality',     Production: 97, Packaging: 91, Quality: 99, Logistics: 85 },
-  { metric: 'Delivery',    Production: 88, Packaging: 90, Quality: 92, Logistics: 92 },
-  { metric: 'Capacity',    Production: 68, Packaging: 75, Quality: 82, Logistics: 78 },
-  { metric: 'Compliance',  Production: 96, Packaging: 93, Quality: 99, Logistics: 90 },
-  { metric: 'Cost Index',  Production: 85, Packaging: 88, Quality: 91, Logistics: 82 },
-];
-
+// ─── STATIC DATA ─────────────────────────────────────────────────────────────
 const _WEEKLY_FALLBACK = [
   { day: 'Mon', Production: 88, Packaging: 91, Quality: 97, Logistics: 89 },
   { day: 'Tue', Production: 90, Packaging: 92, Quality: 98, Logistics: 91 },
@@ -42,7 +33,7 @@ function signedDelta(cur, prev) {
   return `${parseFloat(d) >= 0 ? '+' : ''}${d}%`;
 }
 
-// ─── BUILDER FUNCTIONS (all accept T) ────────────────────────────────────────
+// ─── BUILDER FUNCTIONS ────────────────────────────────────────────────────────
 function buildKpiCards(prodData, qualData, T) {
   const p  = prodData?.today;
   const pY = prodData?.yesterday;
@@ -54,11 +45,11 @@ function buildKpiCards(prodData, qualData, T) {
   const prodDelta  = (prodOut != null && prodTarget > 0)
     ? `${((prodOut - prodTarget) / prodTarget * 100).toFixed(1)}` : null;
 
-  const cap   = p?.capacityPct      ?? null;
-  const capY  = pY?.capacityPct     ?? null;
-  const qpr   = q?.qualityPassRate  ?? null;
-  const qprY  = qY?.qualityPassRate ?? null;
-  const ncr   = q?.openNcrs         ?? null;
+  const cap  = p?.capacityPct      ?? null;
+  const capY = pY?.capacityPct     ?? null;
+  const qpr  = q?.qualityPassRate  ?? null;
+  const qprY = qY?.qualityPassRate ?? null;
+  const ncr  = q?.openNcrs         ?? null;
 
   const pOutSpark = (prodData?.last9 ?? []).map(d => Math.round((d.totalProduced ?? 0) / 1000));
   const capSpark  = (prodData?.last9 ?? []).map(d => Math.round(d.capacityPct ?? 0));
@@ -81,8 +72,8 @@ function buildKpiCards(prodData, qualData, T) {
       spark: capSpark.length >= 3 ? capSpark : [55,60,58,62,59,65,63,67,68],
       ...T.prod, iconBg: T.prod.light, iconColor: T.prod.solid, iconType: 'gauge',
     },
-    { id: 'pkg-eff', domain: 'Packaging', label: 'Line Efficiency',   value: '94.2%', unit: null, delta: '+2.1% vs yesterday', pos: true, spark: [88,90,89,92,91,93,92,94,94], ...T.pkg, iconBg: T.pkg.light, iconColor: T.pkg.solid, iconType: 'box'     },
-    { id: 'pkg-pkg', domain: 'Packaging', label: 'Packages Today',    value: '45.2K', unit: null, delta: '+6.8% vs target',    pos: true, spark: [38,40,39,42,41,43,44,45,45], ...T.pkg, iconBg: T.pkg.light, iconColor: T.pkg.solid, iconType: 'package' },
+    { id: 'pkg-eff', domain: 'Packaging', label: 'Line Efficiency',   value: '94.2%', unit: null, delta: '+2.1% vs yesterday', pos: true,  spark: [88,90,89,92,91,93,92,94,94], ...T.pkg, iconBg: T.pkg.light, iconColor: T.pkg.solid, iconType: 'box'     },
+    { id: 'pkg-pkg', domain: 'Packaging', label: 'Packages Today',    value: '45.2K', unit: null, delta: '+6.8% vs target',    pos: true,  spark: [38,40,39,42,41,43,44,45,45], ...T.pkg, iconBg: T.pkg.light, iconColor: T.pkg.solid, iconType: 'package' },
     {
       id: 'qlt-pas', domain: 'Quality', label: 'Quality Pass Rate',
       value: qpr != null ? `${qpr.toFixed(1)}%` : '—', unit: null,
@@ -99,8 +90,8 @@ function buildKpiCards(prodData, qualData, T) {
       spark: [12, 10, 9, 8, 9, 7, 8, 7, ncr ?? 7],
       ...T.qlt, iconBg: T.qlt.light, iconColor: T.qlt.solid, iconType: 'alertTri', isAlert: ncr != null ? ncr > 0 : true,
     },
-    { id: 'log-otd', domain: 'Logistics', label: 'On-Time Delivery', value: '92%', unit: null, delta: '+3.4% vs last month', pos: true,  spark: [85,87,88,89,90,91,90,92,92], ...T.log, iconBg: T.log.light, iconColor: T.log.solid, iconType: 'truck' },
-    { id: 'log-int', domain: 'Logistics', label: 'In Transit',       value: '15',  unit: null, delta: '2 delayed',           pos: false, spark: [10,12,11,13,14,13,15,15,15], ...T.log, iconBg: T.log.light, iconColor: T.log.solid, iconType: 'truck', isAlert: true },
+    { id: 'log-otd', domain: 'Logistics', label: 'On-Time Delivery', value: '92%',  unit: null, delta: '+3.4% vs last month', pos: true,  spark: [85,87,88,89,90,91,90,92,92], ...T.log, iconBg: T.log.light, iconColor: T.log.solid, iconType: 'truck'   },
+    { id: 'log-int', domain: 'Logistics', label: 'In Transit',       value: '15',   unit: null, delta: '2 delayed',           pos: false, spark: [10,12,11,13,14,13,15,15,15], ...T.log, iconBg: T.log.light, iconColor: T.log.solid, iconType: 'truck', isAlert: true },
   ];
 }
 
@@ -111,10 +102,11 @@ function buildWeeklyTrend(prodData, qualData) {
   const allDates = [...new Set([...Object.keys(pMap), ...Object.keys(qMap)])].sort().slice(-7);
   if (allDates.length < 2) return _WEEKLY_FALLBACK;
   return allDates.map(date => ({
-    day: new Date(date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' }),
-    Production: Math.round(pMap[date]?.onTimePct   ?? 0),
-    Quality:    Math.round(qMap[date]?.qualityPassRate ?? 0),
-    Packaging:  94, Logistics: 90,
+    day:        new Date(date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' }),
+    Production: Math.round(pMap[date]?.onTimePct        ?? 0),
+    Quality:    Math.round(qMap[date]?.qualityPassRate  ?? 0),
+    Packaging:  94,
+    Logistics:  90,
   }));
 }
 
@@ -122,9 +114,9 @@ function buildPerfVsTarget(prodData, qualData) {
   const p = prodData?.today, q = qualData?.today;
   return [
     { domain: 'Production', actual: p ? Math.round(p.capacityPct)    : 92, target: 85 },
-    { domain: 'Packaging',  actual: 94, target: 90 },
+    { domain: 'Packaging',  actual: 94,                                     target: 90 },
     { domain: 'Quality',    actual: q ? Math.round(q.qualityPassRate) : 99, target: 95 },
-    { domain: 'Logistics',  actual: 88, target: 90 },
+    { domain: 'Logistics',  actual: 88,                                     target: 90 },
   ];
 }
 
@@ -135,14 +127,22 @@ function buildDomainStatus(prodData, qualData, T) {
   return [
     {
       icon: '🏭', label: 'Production', color: T.prod.solid, light: T.prod.light,
-      health: prodHealth, hc: prodHealth === 'On Track' ? T.green.solid : T.amber.solid, hb: prodHealth === 'On Track' ? T.green.light : T.amber.light,
-      detail: p ? `${p.batches?.in_progress ?? 0} active batches · ${p.batches?.completed ?? 0} completed today` : '8 active batches · 3/3 shifts running',
+      health: prodHealth,
+      hc: prodHealth === 'On Track' ? T.green.solid : T.amber.solid,
+      hb: prodHealth === 'On Track' ? T.green.light : T.amber.light,
+      detail: p
+        ? `${p.batches?.in_progress ?? 0} active batches · ${p.batches?.completed ?? 0} completed today`
+        : '8 active batches · 3/3 shifts running',
     },
-    { icon: '📦', label: 'Packaging',  color: T.pkg.solid,  light: T.pkg.light,  health: 'On Track',  hc: T.green.solid, hb: T.green.light, detail: '2/4 lines running · Line C under maintenance' },
+    { icon: '📦', label: 'Packaging', color: T.pkg.solid, light: T.pkg.light, health: 'On Track', hc: T.green.solid, hb: T.green.light, detail: '2/4 lines running · Line C under maintenance' },
     {
       icon: '📋', label: 'Quality', color: T.qlt.solid, light: T.qlt.light,
-      health: qualHealth, hc: qualHealth === 'On Track' ? T.green.solid : T.amber.solid, hb: qualHealth === 'On Track' ? T.green.light : T.amber.light,
-      detail: q ? `${q.capaCritical ?? 0} critical CAPA pending · ${(q.deviationCritical ?? 0) + (q.deviationMajor ?? 0) + (q.deviationMinor ?? 0)} open deviations` : '1 critical CAPA pending · 3 open deviations',
+      health: qualHealth,
+      hc: qualHealth === 'On Track' ? T.green.solid : T.amber.solid,
+      hb: qualHealth === 'On Track' ? T.green.light : T.amber.light,
+      detail: q
+        ? `${q.capaCritical ?? 0} critical CAPA pending · ${(q.deviationCritical ?? 0) + (q.deviationMajor ?? 0) + (q.deviationMinor ?? 0)} open deviations`
+        : '1 critical CAPA pending · 3 open deviations',
     },
     { icon: '🚛', label: 'Logistics', color: T.log.solid, light: T.log.light, health: 'Attention', hc: T.amber.solid, hb: T.amber.light, detail: '2 shipments delayed · 23 pending dispatch' },
   ];
@@ -163,36 +163,34 @@ function buildAlerts(prodData, qualData, T) {
   if (audit)
     list.push({ icon: '📋', domain: 'Quality', msg: `${audit.name} scheduled ${audit.date}`, priority: 'Low', pc: T.blue.solid, pb: T.blue.light });
   list.push({ icon: '🚛', domain: 'Logistics', msg: 'SHP-004 & SHP-005 delayed — Bangalore & Chennai', priority: 'Medium', pc: T.amber.solid, pb: T.amber.light });
-  list.push({ icon: '📦', domain: 'Packaging', msg: 'Line C maintenance expected complete by 4 PM', priority: 'Low', pc: T.blue.solid, pb: T.blue.light });
+  list.push({ icon: '📦', domain: 'Packaging', msg: 'Line C maintenance expected complete by 4 PM',    priority: 'Low',    pc: T.blue.solid,  pb: T.blue.light  });
   const ORDER = { High: 0, Medium: 1, Low: 2 };
   return list.sort((a, b) => ORDER[a.priority] - ORDER[b.priority]).slice(0, 5);
 }
 
 function buildUpcoming(prodData, qualData, T) {
-  const acts = prodData?.today?.activities ?? {};
+  const acts   = prodData?.today?.activities     ?? {};
   const audits = qualData?.today?.upcomingAudits ?? [];
-  const list = [];
-  const calDue = acts.equipment_calibration_due ?? 0;
-  if (calDue > 0) list.push({ label: 'Equipment Calibration', note: `${calDue} due today`, iconBg: T.blue.light, iconColor: T.blue.solid, urgency: 'high', domain: 'Production' });
-  const maintDue = acts.preventive_maintenance_due ?? 0;
-  if (maintDue > 0) list.push({ label: 'Preventive Maintenance', note: `${maintDue} due this week`, iconBg: T.green.light, iconColor: T.green.solid, urgency: 'med', domain: 'Production' });
-  const qcTime = acts.qc_review_time;
-  if (qcTime) list.push({ label: 'QC Review', note: typeof qcTime === 'string' ? qcTime : 'Today', iconBg: T.red.light, iconColor: T.red.solid, urgency: 'high', domain: 'Quality' });
-  audits.slice(0, 2).forEach(a => {
-    list.push({
-      label: a.name ?? 'Scheduled Audit', note: a.date ?? '',
-      iconBg:    a.priority === 'High' ? T.red.light   : T.amber.light,
-      iconColor: a.priority === 'High' ? T.red.solid   : T.amber.solid,
-      urgency:   a.priority === 'High' ? 'high' : a.priority === 'Medium' ? 'med' : 'low',
-      domain: 'Quality',
-    });
-  });
+  const list   = [];
+  const calDue  = acts.equipment_calibration_due    ?? 0;
+  const maintDue = acts.preventive_maintenance_due  ?? 0;
+  const qcTime   = acts.qc_review_time;
+  if (calDue   > 0) list.push({ label: 'Equipment Calibration',  note: `${calDue} due today`,        iconBg: T.blue.light,  iconColor: T.blue.solid,  urgency: 'high', domain: 'Production' });
+  if (maintDue > 0) list.push({ label: 'Preventive Maintenance', note: `${maintDue} due this week`,   iconBg: T.green.light, iconColor: T.green.solid, urgency: 'med',  domain: 'Production' });
+  if (qcTime)       list.push({ label: 'QC Review',              note: typeof qcTime === 'string' ? qcTime : 'Today', iconBg: T.red.light, iconColor: T.red.solid, urgency: 'high', domain: 'Quality' });
+  audits.slice(0, 2).forEach(a => list.push({
+    label: a.name ?? 'Scheduled Audit', note: a.date ?? '',
+    iconBg:    a.priority === 'High' ? T.red.light   : T.amber.light,
+    iconColor: a.priority === 'High' ? T.red.solid   : T.amber.solid,
+    urgency:   a.priority === 'High' ? 'high' : a.priority === 'Medium' ? 'med' : 'low',
+    domain: 'Quality',
+  }));
   if (list.length < 4) list.push({ label: 'Carrier Performance Review', note: 'Logistics · Jun 25', iconBg: T.log.light, iconColor: T.log.solid, urgency: 'low', domain: 'Logistics' });
   return list.slice(0, 4);
 }
 
 function buildProdLines(prodData, T) {
-  const PROD_LINE_BASE = [
+  const BASE = [
     { key: 'granulation', label: 'Granulation', color: T.prod.solid, light: T.prod.light },
     { key: 'compression', label: 'Compression', color: T.pkg.solid,  light: T.pkg.light  },
     { key: 'coating',     label: 'Coating',     color: T.qlt.solid,  light: T.qlt.light  },
@@ -203,21 +201,40 @@ function buildProdLines(prodData, T) {
   const maintDue = prodData?.today?.activities?.preventive_maintenance_due ?? 0;
   const onHold   = prodData?.today?.batches?.on_hold ?? 0;
 
-  return PROD_LINE_BASE.map((l, i) => {
+  return BASE.map((l, i) => {
     const units = areas[l.key] ?? 0;
     const pct   = total > 0 ? ((units / total) * 100).toFixed(1) : '0.0';
     let status, statusColor, statusBg, dotColor;
     if (i === 2 && maintDue > 3) {
       status = 'Maintenance'; statusColor = T.amber.text; statusBg = T.amber.light; dotColor = T.amber.solid;
     } else if (i === 3 && onHold > 2) {
-      status = 'On Hold'; statusColor = T.amber.text; statusBg = T.amber.light; dotColor = T.amber.solid;
+      status = 'On Hold';     statusColor = T.amber.text; statusBg = T.amber.light; dotColor = T.amber.solid;
     } else if (units > 0) {
-      status = 'Running'; statusColor = T.green.text; statusBg = T.green.light; dotColor = T.green.solid;
+      status = 'Running';     statusColor = T.green.text; statusBg = T.green.light; dotColor = T.green.solid;
     } else {
-      status = 'Idle'; statusColor = 'var(--txt2)'; statusBg = 'var(--bg)'; dotColor = 'var(--txt3)';
+      status = 'Idle';        statusColor = 'var(--txt2)'; statusBg = 'var(--bg)'; dotColor = 'var(--txt3)';
     }
     return { ...l, status, statusColor, statusBg, dotColor, sub: `${pct}% of total output`, unitsFormatted: `${(units / 1000).toFixed(1)}K` };
   });
+}
+
+function buildScorecard(p, q) {
+  const capPct  = Math.round(p.capacityPct      ?? 92);
+  const bsr     = Math.round(p.batchSuccessRate ?? 96);
+  const onTime  = Math.round(p.onTimePct        ?? 88);
+  const prodQPR = Math.round(p.qualityPassRate  ?? 97);
+  const qpr          = Math.round(q.qualityPassRate ?? 99);
+  const auditScore   = Math.round(q.auditScore      ?? 92);
+  const inspCoverage = (q.totalInspected ?? 0) > 0
+    ? Math.round((q.passCount / q.totalInspected) * 100) : 95;
+  return [
+    { metric: 'Efficiency',  Production: capPct,  Packaging: 94, Quality: qpr,          Logistics: 88 },
+    { metric: 'Quality',     Production: prodQPR, Packaging: 91, Quality: qpr,          Logistics: 85 },
+    { metric: 'Delivery',    Production: onTime,  Packaging: 90, Quality: auditScore,   Logistics: 92 },
+    { metric: 'Capacity',    Production: capPct,  Packaging: 75, Quality: inspCoverage, Logistics: 78 },
+    { metric: 'Compliance',  Production: bsr,     Packaging: 93, Quality: auditScore,   Logistics: 90 },
+    { metric: 'Cost Index',  Production: 85,      Packaging: 88, Quality: 91,           Logistics: 82 },
+  ];
 }
 
 // ─── ICON SYSTEM ─────────────────────────────────────────────────────────────
@@ -241,7 +258,7 @@ function Sparkline({ data, color }) {
   const id = useRef(`spk-${_sparkId++}`).current;
   const w = 72, h = 32;
   const min = Math.min(...data), max = Math.max(...data), range = max - min || 1;
-  const pts = data.map((p, i) => ({ x: (i / (data.length - 1)) * w, y: h - 5 - ((p - min) / range) * (h - 10) }));
+  const pts = data.map((v, i) => ({ x: (i / (data.length - 1)) * w, y: h - 5 - ((v - min) / range) * (h - 10) }));
   const linePath = `M${pts.map(p => `${p.x},${p.y}`).join(' L')}`;
   const areaPath = `${linePath} L${pts[pts.length-1].x},${h} L${pts[0].x},${h} Z`;
   return (
@@ -260,7 +277,7 @@ function Sparkline({ data, color }) {
   );
 }
 
-// ─── CARD ────────────────────────────────────────────────────────────────────
+// ─── SHARED UI COMPONENTS ─────────────────────────────────────────────────────
 function Card({ children, style = {}, alert }) {
   const [hov, setHov] = useState(false);
   return (
@@ -331,6 +348,15 @@ export default function EnterpriseDashboard() {
   const { data: prodData } = useProductionData();
   const { data: qualData } = useQualityData();
 
+  const kpiCards     = buildKpiCards(prodData, qualData, T);
+  const prodLines    = buildProdLines(prodData, T);
+  const weeklyTrend  = buildWeeklyTrend(prodData, qualData);
+  const perfVsTarget = buildPerfVsTarget(prodData, qualData);
+  const domainStatus = buildDomainStatus(prodData, qualData, T);
+  const alerts       = buildAlerts(prodData, qualData, T);
+  const upcoming     = buildUpcoming(prodData, qualData, T);
+  const scorecard    = buildScorecard(prodData?.today ?? {}, qualData?.today ?? {});
+
   const DOMAIN_LEGEND = [
     { label: 'Production', color: T.prod.solid },
     { label: 'Packaging',  color: T.pkg.solid  },
@@ -339,13 +365,12 @@ export default function EnterpriseDashboard() {
   ];
   const PERF_COLORS = [T.prod.solid, T.pkg.solid, T.qlt.solid, T.log.solid];
 
-  const kpiCards     = buildKpiCards(prodData, qualData, T);
-  const prodLines    = buildProdLines(prodData, T);
-  const weeklyTrend  = buildWeeklyTrend(prodData, qualData);
-  const perfVsTarget = buildPerfVsTarget(prodData, qualData);
-  const domainStatus = buildDomainStatus(prodData, qualData, T);
-  const alerts       = buildAlerts(prodData, qualData, T);
-  const upcoming     = buildUpcoming(prodData, qualData, T);
+  const trendMin = weeklyTrend.length
+    ? Math.max(55, Math.floor(Math.min(...weeklyTrend.flatMap(d => [d.Production, d.Packaging, d.Quality, d.Logistics])) / 5) * 5 - 3)
+    : 82;
+  const perfMin = perfVsTarget.length
+    ? Math.max(55, Math.floor(Math.min(...perfVsTarget.flatMap(d => [d.actual, d.target])) / 5) * 5 - 5)
+    : 78;
 
   return (
     <div style={{ fontFamily: 'Inter, system-ui, -apple-system, sans-serif', background: 'var(--bg)', minHeight: '100%' }}>
@@ -418,7 +443,7 @@ export default function EnterpriseDashboard() {
             <ResponsiveContainer width="100%" height={200}>
               <LineChart data={weeklyTrend} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
                 <XAxis dataKey="day" tick={{ fontSize: 11, fill: 'var(--txt3)' }} axisLine={false} tickLine={false} />
-                <YAxis domain={[82, 100]} tick={{ fontSize: 11, fill: 'var(--txt3)' }} axisLine={false} tickLine={false} />
+                <YAxis domain={[trendMin, 100]} tick={{ fontSize: 11, fill: 'var(--txt3)' }} axisLine={false} tickLine={false} />
                 <Tooltip content={<ChartTip />} />
                 <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, fontFamily: 'Inter, system-ui' }} />
                 <Line type="monotone" dataKey="Production" stroke={T.prod.solid} strokeWidth={2} dot={false} />
@@ -453,10 +478,10 @@ export default function EnterpriseDashboard() {
                 <div style={{ height: 1, background: 'var(--brd)', margin: '12px 0 10px' }} />
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   {[
-                    { label: 'In Progress', value: prodData.today.batches.in_progress ?? 0, color: T.prod.solid },
-                    { label: 'Completed',   value: prodData.today.batches.completed   ?? 0, color: T.green.solid },
-                    { label: 'On Hold',     value: prodData.today.batches.on_hold     ?? 0, color: T.amber.solid },
-                    { label: 'Pending',     value: prodData.today.batches.pending     ?? 0, color: 'var(--txt3)' },
+                    { label: 'In Progress', value: prodData.today.batches?.in_progress ?? 0, color: T.prod.solid  },
+                    { label: 'Completed',   value: prodData.today.batches?.completed   ?? 0, color: T.green.solid },
+                    { label: 'On Hold',     value: prodData.today.batches?.on_hold     ?? 0, color: T.amber.solid },
+                    { label: 'Pending',     value: prodData.today.batches?.pending     ?? 0, color: 'var(--txt3)' },
                   ].map((s, i) => (
                     <div key={i} style={{ textAlign: 'center', flex: 1 }}>
                       <div style={{ fontSize: 18, fontWeight: 800, color: s.color, letterSpacing: '-0.03em' }}>{s.value}</div>
@@ -482,9 +507,10 @@ export default function EnterpriseDashboard() {
               ))}
             </div>
           </Card>
+
         </div>
 
-        {/* Row 3: Performance vs Target + Scorecard + Status */}
+        {/* Row 3: Performance vs Target + Scorecard + Domain Health + Upcoming */}
         <div className="ent-bot" style={{ alignItems: 'stretch' }}>
 
           <Card style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column' }}>
@@ -492,13 +518,13 @@ export default function EnterpriseDashboard() {
             <ResponsiveContainer width="100%" height={190}>
               <BarChart data={perfVsTarget} margin={{ top: 4, right: 8, left: -18, bottom: 0 }} barCategoryGap="32%" barGap={3}>
                 <XAxis dataKey="domain" tick={{ fontSize: 11, fill: 'var(--txt3)' }} axisLine={false} tickLine={false} />
-                <YAxis domain={[78, 100]} ticks={[80,85,90,95,100]} tick={{ fontSize: 11, fill: 'var(--txt3)' }} axisLine={false} tickLine={false} />
-                <Tooltip content={<ChartTip />} cursor={{ fill: 'rgba(128,128,128,0.06)', radius: [4,4,0,0] }} />
+                <YAxis domain={[perfMin, 100]} ticks={[perfMin, Math.round((perfMin + 100) / 2), 100]} tick={{ fontSize: 11, fill: 'var(--txt3)' }} axisLine={false} tickLine={false} />
+                <Tooltip content={<ChartTip />} cursor={{ fill: 'rgba(0,0,0,0.04)', radius: [4, 4, 0, 0] }} />
                 <Legend iconType="square" iconSize={9} wrapperStyle={{ fontSize: 11, fontFamily: 'Inter, system-ui' }} />
-                <Bar dataKey="actual" name="Actual" radius={[4,4,0,0]}>
+                <Bar dataKey="actual" name="Actual" radius={[4, 4, 0, 0]}>
                   {perfVsTarget.map((_, i) => <Cell key={i} fill={PERF_COLORS[i]} />)}
                 </Bar>
-                <Bar dataKey="target" name="Target" fill="rgba(128,128,128,0.25)" radius={[4,4,0,0]} />
+                <Bar dataKey="target" name="Target" fill="rgba(128,128,128,0.25)" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
             <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
@@ -518,8 +544,8 @@ export default function EnterpriseDashboard() {
                     </div>
                   </div>
                   <div style={{ height: 7, background: 'var(--brd)', borderRadius: 999, position: 'relative', overflow: 'hidden' }}>
-                    <div style={{ height: '100%', borderRadius: 999, background: PERF_COLORS[i], width: `${((d.actual - 78) / (100 - 78)) * 100}%`, transition: 'width 0.4s ease' }} />
-                    <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${((d.target - 78) / (100 - 78)) * 100}%`, width: 2, background: 'var(--txt3)', opacity: 0.5 }} />
+                    <div style={{ height: '100%', borderRadius: 999, background: PERF_COLORS[i], width: `${((d.actual - perfMin) / (100 - perfMin)) * 100}%`, transition: 'width 0.4s ease' }} />
+                    <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${((d.target - perfMin) / (100 - perfMin)) * 100}%`, width: 2, background: 'var(--txt3)', opacity: 0.5 }} />
                   </div>
                 </div>
               ))}
@@ -529,12 +555,7 @@ export default function EnterpriseDashboard() {
           <Card style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column' }}>
             <SectionTitle>Domain Scorecard</SectionTitle>
             <div style={{ display: 'flex', justifyContent: 'center', gap: 20, flexWrap: 'wrap', marginBottom: 8 }}>
-              {[
-                { label: 'Production', color: T.prod.solid },
-                { label: 'Packaging',  color: T.pkg.solid  },
-                { label: 'Quality',    color: T.qlt.solid  },
-                { label: 'Logistics',  color: T.log.solid  },
-              ].map(d => (
+              {DOMAIN_LEGEND.map(d => (
                 <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: d.color, flexShrink: 0 }} />
                   <span style={{ fontSize: 11, color: 'var(--txt2)', fontWeight: 500 }}>{d.label}</span>
@@ -542,7 +563,7 @@ export default function EnterpriseDashboard() {
               ))}
             </div>
             <ResponsiveContainer width="100%" height={210}>
-              <RadarChart data={SCORECARD} cx="50%" cy="50%" outerRadius="68%" margin={{ top: 10, right: 36, left: 36, bottom: 10 }}>
+              <RadarChart data={scorecard} cx="50%" cy="50%" outerRadius="68%" margin={{ top: 10, right: 36, left: 36, bottom: 10 }}>
                 <PolarGrid stroke="var(--brd)" />
                 <PolarAngleAxis dataKey="metric" tick={{ fontSize: 10.5, fill: 'var(--txt2)', fontFamily: 'Inter, system-ui', fontWeight: 500 }} />
                 <PolarRadiusAxis domain={[60, 100]} tick={false} axisLine={false} />
@@ -551,16 +572,17 @@ export default function EnterpriseDashboard() {
                 <Radar name="Packaging"  dataKey="Packaging"  stroke={T.pkg.solid}  fill={T.pkg.solid}  fillOpacity={0.13} strokeWidth={2} />
                 <Radar name="Quality"    dataKey="Quality"    stroke={T.qlt.solid}  fill={T.qlt.solid}  fillOpacity={0.13} strokeWidth={2} />
                 <Radar name="Logistics"  dataKey="Logistics"  stroke={T.log.solid}  fill={T.log.solid}  fillOpacity={0.13} strokeWidth={2} />
+                <Legend iconType="circle" iconSize={8} verticalAlign="top" align="center" wrapperStyle={{ fontSize: 11, fontFamily: 'Inter, system-ui', paddingBottom: 4 }} />
               </RadarChart>
             </ResponsiveContainer>
             <div style={{ marginTop: 14, flex: 1 }}>
               <div style={{ height: 1, background: 'var(--brd)', marginBottom: 12 }} />
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
                 {[
-                  { label: 'Production', color: T.prod.solid, light: T.prod.light, avg: prodData?.today ? prodData.today.capacityPct.toFixed(1) : '87.7', top: `On-time ${prodData?.today ? prodData.today.onTimePct.toFixed(0) : 88}%` },
-                  { label: 'Packaging',  color: T.pkg.solid,  light: T.pkg.light,  avg: '88.5', top: 'Efficiency 94%' },
-                  { label: 'Quality',    color: T.qlt.solid,  light: T.qlt.light,  avg: qualData?.today ? qualData.today.qualityPassRate.toFixed(1) : '93.2', top: `Audit ${qualData?.today ? qualData.today.auditScore.toFixed(0) : 99}%` },
-                  { label: 'Logistics',  color: T.log.solid,  light: T.log.light,  avg: '85.8', top: 'Delivery 92%' },
+                  { label: 'Production', color: T.prod.solid, light: T.prod.light, avg: prodData?.today?.capacityPct?.toFixed(1)     ?? '87.7', top: `On-time ${prodData?.today?.onTimePct?.toFixed(0)         ?? 88}%`  },
+                  { label: 'Packaging',  color: T.pkg.solid,  light: T.pkg.light,  avg: '88.5',                                                  top: 'Efficiency 94%'                                                     },
+                  { label: 'Quality',    color: T.qlt.solid,  light: T.qlt.light,  avg: qualData?.today?.qualityPassRate?.toFixed(1) ?? '93.2', top: `Audit ${qualData?.today?.auditScore?.toFixed(0)         ?? 99}%`  },
+                  { label: 'Logistics',  color: T.log.solid,  light: T.log.light,  avg: '85.8',                                                  top: 'Delivery 92%'                                                       },
                 ].map((d, i) => (
                   <div key={i} style={{ background: `${d.light}80`, borderRadius: 10, padding: '10px 12px', border: `1px solid ${d.color}22` }}>
                     <div style={{ fontSize: 10.5, color: 'var(--txt2)', fontWeight: 500, marginBottom: 4 }}>{d.label}</div>
@@ -572,6 +594,7 @@ export default function EnterpriseDashboard() {
             </div>
           </Card>
 
+          {/* Domain Health Status + Upcoming Activities */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
             <Card style={{ padding: '16px 18px', flex: 1 }}>
@@ -606,13 +629,14 @@ export default function EnterpriseDashboard() {
                       <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt)' }}>{a.label}</div>
                       <div style={{ fontSize: 10.5, color: 'var(--txt3)', marginTop: 1 }}>{a.domain} · {a.note}</div>
                     </div>
-                    <div style={{ fontSize: 9.5, fontWeight: 700, padding: '2px 7px', borderRadius: 999, background: a.urgency === 'high' ? T.red.light : a.urgency === 'med' ? T.amber.light : T.blue.light, color: a.urgency === 'high' ? T.red.text : a.urgency === 'med' ? T.amber.text : T.blue.text, textTransform: 'uppercase', flexShrink: 0 }}>
+                    <div style={{ fontSize: 9.5, fontWeight: 700, padding: '2px 7px', borderRadius: 999, textTransform: 'uppercase', flexShrink: 0, background: a.urgency === 'high' ? T.red.light : a.urgency === 'med' ? T.amber.light : T.blue.light, color: a.urgency === 'high' ? T.red.text : a.urgency === 'med' ? T.amber.text : T.blue.text }}>
                       {a.urgency === 'high' ? 'Urgent' : a.urgency === 'med' ? 'Soon' : 'Planned'}
                     </div>
                   </div>
                 ))}
               </div>
             </Card>
+
           </div>
         </div>
 
