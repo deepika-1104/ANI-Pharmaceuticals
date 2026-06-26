@@ -402,9 +402,9 @@ export async function logoutApi(refreshToken) {
   } catch { /* ignore */ }
 }
 
-export async function logoutAllApi() {
-  return apiJson(`${API_BASE}/auth/logout-all`, { method: 'POST' });
-}
+// export async function logoutAllApi() {
+//   return apiJson(`${API_BASE}/auth/logout-all`, { method: 'POST' });
+// }
 
 export async function resetPassword(identifier, oldPassword, newPassword) {
   const res = await fetch(`${API_BASE}/auth/reset-password`, {
@@ -421,9 +421,9 @@ export async function resetPassword(identifier, oldPassword, newPassword) {
 
 // ── Admin endpoints ───────────────────────────────────────────────────────────
 
-export async function clearServerCache() {
-  return apiJson(`${API_BASE}/cache/clear`, { method: 'POST' });
-}
+// export async function clearServerCache() {
+//   return apiJson(`${API_BASE}/cache/clear`, { method: 'POST' });
+// }
 
 // ── Data endpoints ────────────────────────────────────────────────────────────
 
@@ -443,21 +443,21 @@ export async function transcribeAudio(audioBlob) {
   return apiJson(`${API_BASE}/speech-to-text`, { method: 'POST', body: form });
 }
 
-export async function sendMessage(message, conversationId, history = []) {
-  return apiJson(`${API_BASE}/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, conversation_id: conversationId, history }),
-  });
-}
+// export async function sendMessage(message, conversationId, history = []) {
+//   return apiJson(`${API_BASE}/chat`, {
+//     method: 'POST',
+//     headers: { 'Content-Type': 'application/json' },
+//     body: JSON.stringify({ message, conversation_id: conversationId, history }),
+//   });
+// }
 
-export async function executeQuery(query, conversationId) {
-  return apiJson(`${API_BASE}/query`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, conversation_id: conversationId }),
-  });
-}
+// export async function executeQuery(query, conversationId) {
+//   return apiJson(`${API_BASE}/query`, {
+//     method: 'POST',
+//     headers: { 'Content-Type': 'application/json' },
+//     body: JSON.stringify({ query, conversation_id: conversationId }),
+//   });
+// }
 
 export async function getHistory() {
   return apiJson(`${API_BASE}/history`);

@@ -214,77 +214,77 @@ async def get_index_status(current_user: dict = Depends(get_current_user)):
     return {"index_health": health}
 
 
-@router.get("/debug")
-async def debug_rag(
-    query: str = "",
-    current_user: dict = Depends(get_current_user),
-):
-    """
-    Debug endpoint — inspect what is stored in rag_chunks for this user and
-    optionally run a test retrieval.
-
-    GET /api/documents/debug                  → show stored chunks summary
-    GET /api/documents/debug?query=CareConnect → also run live retrieval
-    """
-    db = get_db()
-    if db is None:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-
-    user_id = str(current_user["id"])
-    from rag.document_store import RAG_CHUNKS_COLLECTION, RAG_DOCUMENTS_COLLECTION
-
-    # Count and sample chunks
-    total_chunks = await db[RAG_CHUNKS_COLLECTION].count_documents({"user_id": user_id})
-    sample_cursor = db[RAG_CHUNKS_COLLECTION].find(
-        {"user_id": user_id},
-        {"_id": 0, "filename": 1, "chunk_index": 1, "text": 1, "embedding": 1},
-    ).limit(3)
-    sample_chunks = await sample_cursor.to_list(length=3)
-
-    # Summarize each chunk (don't return full embeddings)
-    chunk_preview = []
-    for c in sample_chunks:
-        has_embedding = c.get("embedding") is not None and len(c.get("embedding", [])) > 0
-        chunk_preview.append({
-            "filename": c.get("filename"),
-            "chunk_index": c.get("chunk_index"),
-            "text_preview": (c.get("text") or "")[:200],
-            "text_length": len(c.get("text") or ""),
-            "has_embedding": has_embedding,
-            "embedding_dims": len(c.get("embedding") or []),
-        })
-
-    # Document records
-    doc_cursor = db[RAG_DOCUMENTS_COLLECTION].find(
-        {"user_id": user_id},
-        {"_id": 0, "filename": 1, "index_status": 1, "chunk_count": 1,
-         "embedding_model": 1, "error_message": 1},
-    )
-    doc_records = await doc_cursor.to_list(length=20)
-
-    result = {
-        "user_id_prefix": user_id[:8] + "...",
-        "total_chunks_in_db": total_chunks,
-        "documents": doc_records,
-        "chunk_sample": chunk_preview,
-    }
-
-    # Optional: live retrieval test
-    if query:
-        from orchestrator.semantic_expander import get_query_embedding
-        from rag.retriever import retrieve_chunks
-        import os
-        query_vector = await get_query_embedding(query) if os.getenv("EMBEDDING_MODEL") else None
-        chunks, filenames = await retrieve_chunks(db, query_vector, query, user_id, top_k=5)
-        result["test_query"] = query
-        result["test_retrieval"] = {
-            "chunks_found": len(chunks),
-            "filenames": filenames,
-            "top_chunk_text": chunks[0]["text"][:300] if chunks else None,
-            "top_chunk_score": chunks[0].get("score") if chunks else None,
-        }
-
-    return result
+# @router.get("/debug")
+# async def debug_rag(
+#     query: str = "",
+#     current_user: dict = Depends(get_current_user),
+# ):
+#     """
+#     Debug endpoint — inspect what is stored in rag_chunks for this user and
+#     optionally run a test retrieval.
+#
+#     GET /api/documents/debug                  → show stored chunks summary
+#     GET /api/documents/debug?query=CareConnect → also run live retrieval
+#     """
+#     db = get_db()
+#     if db is None:
+#         raise HTTPException(status_code=503, detail="Database unavailable")
+#
+#     user_id = str(current_user["id"])
+#     from rag.document_store import RAG_CHUNKS_COLLECTION, RAG_DOCUMENTS_COLLECTION
+#
+#     # Count and sample chunks
+#     total_chunks = await db[RAG_CHUNKS_COLLECTION].count_documents({"user_id": user_id})
+#     sample_cursor = db[RAG_CHUNKS_COLLECTION].find(
+#         {"user_id": user_id},
+#         {"_id": 0, "filename": 1, "chunk_index": 1, "text": 1, "embedding": 1},
+#     ).limit(3)
+#     sample_chunks = await sample_cursor.to_list(length=3)
+#
+#     # Summarize each chunk (don't return full embeddings)
+#     chunk_preview = []
+#     for c in sample_chunks:
+#         has_embedding = c.get("embedding") is not None and len(c.get("embedding", [])) > 0
+#         chunk_preview.append({
+#             "filename": c.get("filename"),
+#             "chunk_index": c.get("chunk_index"),
+#             "text_preview": (c.get("text") or "")[:200],
+#             "text_length": len(c.get("text") or ""),
+#             "has_embedding": has_embedding,
+#             "embedding_dims": len(c.get("embedding") or []),
+#         })
+#
+#     # Document records
+#     doc_cursor = db[RAG_DOCUMENTS_COLLECTION].find(
+#         {"user_id": user_id},
+#         {"_id": 0, "filename": 1, "index_status": 1, "chunk_count": 1,
+#          "embedding_model": 1, "error_message": 1},
+#     )
+#     doc_records = await doc_cursor.to_list(length=20)
+#
+#     result = {
+#         "user_id_prefix": user_id[:8] + "...",
+#         "total_chunks_in_db": total_chunks,
+#         "documents": doc_records,
+#         "chunk_sample": chunk_preview,
+#     }
+#
+#     # Optional: live retrieval test
+#     if query:
+#         from orchestrator.semantic_expander import get_query_embedding
+#         from rag.retriever import retrieve_chunks
+#         import os
+#         query_vector = await get_query_embedding(query) if os.getenv("EMBEDDING_MODEL") else None
+#         chunks, filenames = await retrieve_chunks(db, query_vector, query, user_id, top_k=5)
+#         result["test_query"] = query
+#         result["test_retrieval"] = {
+#             "chunks_found": len(chunks),
+#             "filenames": filenames,
+#             "top_chunk_text": chunks[0]["text"][:300] if chunks else None,
+#             "top_chunk_score": chunks[0].get("score") if chunks else None,
+#         }
+#
+#     return result
 
 
 # ── Org-level (shared) document endpoints ─────────────────────────────────────
