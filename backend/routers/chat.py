@@ -38,51 +38,52 @@ router = APIRouter()
 logger = logging.getLogger("voxa.router.chat")
 
 
-@router.post("/chat", response_model=ChatResponse)
-async def chat(
-    body: ChatRequest,
-    current_user: dict = Depends(get_current_user),
-):
-    """Non-streaming chat. Returns the full standardised response in one HTTP reply."""
-    orchestrator = get_orchestrator()
-    memory = get_memory_service()
-
-    history = (body.history or []) + memory.get_history(body.conversation_id)
-
-    try:
-        result = await orchestrator.process(
-            query=body.message,
-            session_id=body.conversation_id,
-            conversation_history=history,
-            page=body.page,
-            user_id=str(current_user.get("id", "")),
-            org_id=str(current_user.get("org_id") or ""),
-        )
-    except Exception as exc:
-        logger.error("Orchestrator error: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to process query")
-
-    memory.append(body.conversation_id, body.message, result.response)
-
-    return ChatResponse(
-        success=result.success,
-        response=result.response,
-        conversation_id=body.conversation_id,
-        source=result.source,
-        intent=result.intent,
-        data=result.data,
-        insights=result.insights,
-        collections_used=result.collections_used,
-        confidence=result.confidence,
-        latency_ms=result.latency_ms,
-        followups=result.followups,
-        citations=result.citations,
-        metadata=result.metadata,
-        total_records=result.metadata.get("pagination", {}).get("total_records", 0),
-        page=result.metadata.get("pagination", {}).get("page", 1),
-        page_size=result.metadata.get("pagination", {}).get("page_size", 50),
-        total_pages=result.metadata.get("pagination", {}).get("total_pages", 1),
-    )
+# @router.post("/chat", response_model=ChatResponse)
+# async def chat(
+#     body: ChatRequest,
+#     current_user: dict = Depends(get_current_user),
+# ):
+#     """Non-streaming chat. Returns the full standardised response in one HTTP reply."""
+#     orchestrator = get_orchestrator()
+#     memory = get_memory_service()
+#
+#     history = (body.history or []) + memory.get_history(body.conversation_id)
+#
+#     try:
+#         result = await orchestrator.process(
+#             query=body.message,
+#             session_id=body.conversation_id,
+#             conversation_history=history,
+#             page=body.page,
+#             user_id=str(current_user.get("id", "")),
+#             org_id=str(current_user.get("org_id") or ""),
+#             dashboard_context=body.dashboard_context,
+#         )
+#     except Exception as exc:
+#         logger.error("Orchestrator error: %s", exc, exc_info=True)
+#         raise HTTPException(status_code=500, detail="Failed to process query")
+#
+#     memory.append(body.conversation_id, body.message, result.response)
+#
+#     return ChatResponse(
+#         success=result.success,
+#         response=result.response,
+#         conversation_id=body.conversation_id,
+#         source=result.source,
+#         intent=result.intent,
+#         data=result.data,
+#         insights=result.insights,
+#         collections_used=result.collections_used,
+#         confidence=result.confidence,
+#         latency_ms=result.latency_ms,
+#         followups=result.followups,
+#         citations=result.citations,
+#         metadata=result.metadata,
+#         total_records=result.metadata.get("pagination", {}).get("total_records", 0),
+#         page=result.metadata.get("pagination", {}).get("page", 1),
+#         page_size=result.metadata.get("pagination", {}).get("page_size", 50),
+#         total_pages=result.metadata.get("pagination", {}).get("total_pages", 1),
+#     )
 
 
 @router.websocket("/stream")
@@ -167,10 +168,11 @@ async def stream(websocket: WebSocket):
             if not message:
                 continue
 
-            conv_id    = data.get("conversation_id", "")
-            history    = data.get("history", [])
-            page       = int(data.get("page", 1))
-            request_id = str(data.get("request_id", "") or "")
+            conv_id           = data.get("conversation_id", "")
+            history           = data.get("history", [])
+            page              = int(data.get("page", 1))
+            request_id        = str(data.get("request_id", "") or "")
+            dashboard_context = str(data.get("dashboard_context", "") or "")
 
             def _frame(payload: dict) -> dict:
                 """Echo the request_id on every frame of this request."""
@@ -193,6 +195,7 @@ async def stream(websocket: WebSocket):
                     page=page,
                     user_id=ws_user_id,
                     org_id=ws_org_id,
+                    dashboard_context=dashboard_context,
                 )
                 token_task = asyncio.create_task(gen.__anext__())
                 inbox_task = asyncio.create_task(inbox.get())

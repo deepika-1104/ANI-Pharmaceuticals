@@ -81,11 +81,12 @@ const useChatStore = create((set, get) => ({
 
   // ---- Conversation Actions ----
 
-  createConversation: () => {
+  createConversation: (domain = '') => {
     const id = generateId();
     const conversation = {
       id,
       title: 'New Chat',
+      domain,
       messages: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -97,8 +98,9 @@ const useChatStore = create((set, get) => ({
       isStreaming: false,
       isLoading: false,
     }));
-    // Persist active ID so refresh restores this new chat
     localStorage.setItem('voice-ai-active-id', id);
+    sessionStorage.setItem('voxa-session-active-id', id);
+    if (domain) localStorage.setItem('voxa-active-id-' + domain, id);
     return id;
   },
 
@@ -107,6 +109,8 @@ const useChatStore = create((set, get) => ({
     get().cancelStream();
     set({ activeConversationId: id, streamingText: '', isStreaming: false });
     localStorage.setItem('voice-ai-active-id', id || '');
+    if (id) sessionStorage.setItem('voxa-session-active-id', id);
+    else sessionStorage.removeItem('voxa-session-active-id');
   },
 
   addMessage: (conversationId, { role, content, type, isError, pagination, attachments }) => {
@@ -239,7 +243,6 @@ const useChatStore = create((set, get) => ({
         }
       }
       const updatedConv = { ...conv, messages, updatedAt: Date.now() };
-      const { saveConversation } = require('../services/cache');
       saveConversation(conversationId, updatedConv, _uid());
       return { conversations: { ...state.conversations, [conversationId]: updatedConv } };
     });
@@ -402,6 +405,9 @@ const useChatStore = create((set, get) => ({
     get().cancelStream();
     set({ activeConversationId: null, streamingText: '', isStreaming: false, isLoading: false });
     localStorage.setItem('voice-ai-active-id', '__new__');
+    sessionStorage.removeItem('voxa-session-active-id');
+    const domain = localStorage.getItem('voxa-selected-domain') || 'Enterprise';
+    localStorage.removeItem('voxa-active-id-' + domain);
   },
 
   getActiveConversation: () => {

@@ -19,21 +19,21 @@ class QueryRequest(BaseModel):
     conversation_id: str = ""
 
 
-@router.post("/query")
-async def execute_query(
-    body: QueryRequest,
-    current_user: dict = Depends(get_current_user),
-):
-    """
-    One-shot data query. Returns a structured response with no streaming.
-    Use /chat for multi-turn conversation with memory.
-    """
-    try:
-        result = await get_orchestrator().process(
-            query=body.query,
-            session_id=body.conversation_id,
-        )
-        return result.to_dict()
-    except Exception as exc:
-        logger.error(f"Query error: {exc}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Query processing failed")
+# @router.post("/query")
+# async def execute_query(
+#     body: QueryRequest,
+#     current_user: dict = Depends(get_current_user),
+# ):
+#     """
+#     One-shot data query. Returns a structured response with no streaming.
+#     Use /chat for multi-turn conversation with memory.
+#     """
+#     try:
+#         result = await get_orchestrator().process(
+#             query=body.query,
+#             session_id=body.conversation_id,
+#         )
+#         return result.to_dict()
+#     except Exception as exc:
+#         logger.error(f"Query error: {exc}", exc_info=True)
+#         raise HTTPException(status_code=500, detail="Query processing failed")

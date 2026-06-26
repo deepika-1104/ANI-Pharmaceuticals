@@ -263,8 +263,11 @@ class _VoxaWebSocket {
     if (data.done) {
       if (this._buf && this._onToken) { this._onToken(this._buf); this._buf = ''; }
       const cb = this._onComplete;
+      const savedData = data;
       this._clearHandlers();
-      if (cb) cb(null, data);
+      // Defer finalization off the message handler so the browser isn't blocked
+      // by React's commit phase (addMessage + markdown render) during the event.
+      if (cb) setTimeout(() => cb(null, savedData), 0);
     }
   }
 
@@ -293,7 +296,7 @@ class _VoxaWebSocket {
     this._clearHandlers();
   }
 
-  async send(message, conversationId, history, page, onToken, onComplete, onError) {
+  async send(message, conversationId, history, page, onToken, onComplete, onError, dashboardContext = "") {
     this._clearHandlers();
     this._onToken    = onToken;
     this._onComplete = onComplete;
@@ -312,6 +315,7 @@ class _VoxaWebSocket {
     this._ws.send(JSON.stringify({
       token, message, conversation_id: conversationId, history, page,
       request_id: this._requestId,
+      dashboard_context: dashboardContext,
     }));
   }
 
@@ -330,9 +334,9 @@ export function closeStream() {
   _ws.cancel();
 }
 
-export function streamMessage(message, conversationId, onToken, onComplete, onError, history = [], page = 1) {
+export function streamMessage(message, conversationId, onToken, onComplete, onError, history = [], page = 1, dashboardContext = "") {
   _ws.cancel();
-  _ws.send(message, conversationId, history, page, onToken, onComplete, onError);
+  _ws.send(message, conversationId, history, page, onToken, onComplete, onError, dashboardContext);
   return { close: () => _ws.cancel() };
 }
 
@@ -401,9 +405,9 @@ export async function logoutApi(refreshToken) {
   } catch { /* ignore */ }
 }
 
-export async function logoutAllApi() {
-  return apiJson(`${API_BASE}/auth/logout-all`, { method: 'POST' });
-}
+// export async function logoutAllApi() {
+//   return apiJson(`${API_BASE}/auth/logout-all`, { method: 'POST' });
+// }
 
 export async function resetPassword(identifier, oldPassword, newPassword) {
   const res = await fetch(`${API_BASE}/auth/reset-password`, {
@@ -420,9 +424,9 @@ export async function resetPassword(identifier, oldPassword, newPassword) {
 
 // ── Admin endpoints ───────────────────────────────────────────────────────────
 
-export async function clearServerCache() {
-  return apiJson(`${API_BASE}/cache/clear`, { method: 'POST' });
-}
+// export async function clearServerCache() {
+//   return apiJson(`${API_BASE}/cache/clear`, { method: 'POST' });
+// }
 
 // ── Data endpoints ────────────────────────────────────────────────────────────
 
@@ -442,21 +446,21 @@ export async function transcribeAudio(audioBlob) {
   return apiJson(`${API_BASE}/speech-to-text`, { method: 'POST', body: form });
 }
 
-export async function sendMessage(message, conversationId, history = []) {
-  return apiJson(`${API_BASE}/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, conversation_id: conversationId, history }),
-  });
-}
+// export async function sendMessage(message, conversationId, history = []) {
+//   return apiJson(`${API_BASE}/chat`, {
+//     method: 'POST',
+//     headers: { 'Content-Type': 'application/json' },
+//     body: JSON.stringify({ message, conversation_id: conversationId, history }),
+//   });
+// }
 
-export async function executeQuery(query, conversationId) {
-  return apiJson(`${API_BASE}/query`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, conversation_id: conversationId }),
-  });
-}
+// export async function executeQuery(query, conversationId) {
+//   return apiJson(`${API_BASE}/query`, {
+//     method: 'POST',
+//     headers: { 'Content-Type': 'application/json' },
+//     body: JSON.stringify({ query, conversation_id: conversationId }),
+//   });
+// }
 
 export async function getHistory() {
   return apiJson(`${API_BASE}/history`);

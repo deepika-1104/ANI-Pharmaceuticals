@@ -13,7 +13,7 @@ import UserAvatar from './UserAvatar';
 import DocumentUpload from './DocumentUpload';
 // import MedicineManager from './MedicineManager';
 import AppLogo from './AppLogo';
-import { clearServerCache } from '../services/api';
+// import { clearServerCache } from '../services/api';
 
 export default function Sidebar({ isOpen, onClose, onNavigateToChat }) {
   /* ── Store selectors ── */
@@ -117,17 +117,17 @@ export default function Sidebar({ isOpen, onClose, onNavigateToChat }) {
   };
 
   /* Clear server-side DB result cache (admin only) */
-  const handleClearCache = async () => {
-    setClearingCache(true);
-    try {
-      const result = await clearServerCache();
-      toast.success(`Cache cleared — ${result.entries_removed} entries removed`);
-    } catch {
-      toast.error('Failed to clear cache');
-    } finally {
-      setClearingCache(false);
-    }
-  };
+  // const handleClearCache = async () => {
+  //   setClearingCache(true);
+  //   try {
+  //     const result = await clearServerCache();
+  //     toast.success(`Cache cleared — ${result.entries_removed} entries removed`);
+  //   } catch {
+  //     toast.error('Failed to clear cache');
+  //   } finally {
+  //     setClearingCache(false);
+  //   }
+  // };
 
 
 
@@ -207,26 +207,8 @@ export default function Sidebar({ isOpen, onClose, onNavigateToChat }) {
           </button>
         </div>
 
-        {/* ── New Chat + Documents buttons ── */}
+        {/* ── Documents button ── */}
         <div className="px-3 py-2.5 flex-shrink-0 flex flex-col gap-1.5">
-          <button
-            id="sidebar-new-chat-btn"
-            className="ci-sidebar-btn flex items-center gap-2 px-3 py-2 rounded-lg w-full transition-all duration-150 text-left"
-            style={{ color: 'var(--sb-txt2)' }}
-            onMouseEnter={e => {
-              e.currentTarget.style.borderColor = 'color-mix(in srgb, var(--ci-primary-solid) 45%, transparent)';
-              e.currentTarget.style.color = 'var(--sb-txt)';
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.borderColor = 'var(--sb-brd)';
-              e.currentTarget.style.color = 'var(--sb-txt2)';
-            }}
-            onClick={handleNewChat}
-          >
-            <HiOutlinePlus size={16} style={{ color: 'var(--ci-primary-solid)', flexShrink: 0 }} />
-            <span className="text-[0.8125rem] font-medium">New Chat</span>
-          </button>
-
           <button
             className="ci-sidebar-btn flex items-center gap-2 px-3 py-2 rounded-lg w-full transition-all duration-150 text-left"
             style={{ color: 'var(--sb-txt2)' }}
@@ -427,7 +409,7 @@ export default function Sidebar({ isOpen, onClose, onNavigateToChat }) {
           onClick={() => setSettingsOpen(false)}
         >
           <div
-            className="w-full max-w-[380px] max-h-[80vh] flex flex-col rounded-2xl overflow-hidden animate-fade-in-scale"
+            className="w-full max-w-sm max-h-[88dvh] flex flex-col rounded-2xl overflow-hidden animate-fade-in-scale"
             style={{
               background: 'var(--sb-bg)',
               border: '1px solid var(--sb-brd)',

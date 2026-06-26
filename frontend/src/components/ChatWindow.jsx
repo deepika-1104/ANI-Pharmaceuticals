@@ -22,12 +22,13 @@ function isNearBottom(el) {
   return el.scrollHeight - el.scrollTop - el.clientHeight < 150;
 }
 
-export default function ChatWindow() {
+export default function ChatWindow({ scrollContainerRef, domain = 'Production', dashboardContext = '' }) {
   /* ── DOM refs ── */
   const messagesContainerRef = useRef(null);   // scroll container
   const messagesEndRef       = useRef(null);   // invisible sentinel at the bottom
   const streamHandleRef      = useRef(null);   // holds the active stream handle for cancellation
   const shouldAutoScrollRef  = useRef(true);   // tracks if user is near the bottom
+  const messageScrollRef     = useRef(null);    // inner messages scroll container
   const [showScrollBottom, setShowScrollBottom] = useState(false);
 
   /* ── Chat store selectors ── */
@@ -79,23 +80,39 @@ export default function ChatWindow() {
    * Smart auto-scroll: only scrolls to the bottom when the user is already
    * near the bottom (<150px away). If the user has scrolled up to read history,
    * we don't hijack their scroll position.
+   *
+   * The scroll-to-bottom button is shown only when messagesEndRef is BELOW the
+   * viewport (user scrolled up within the chat). If the user has scrolled PAST
+   * the chat into the dashboard section, messagesEndRef is above the viewport
+   * (rect.bottom < 0) and the button is hidden.
    */
   const handleScroll = useCallback(() => {
-    const nearBottom = isNearBottom(messagesContainerRef.current);
-    shouldAutoScrollRef.current = nearBottom;
-    setShowScrollBottom(!nearBottom);
+    shouldAutoScrollRef.current = isNearBottom(messageScrollRef?.current);
+    if (!messagesEndRef.current || !messageScrollRef.current) { setShowScrollBottom(false); return; }
+    const cRect = messageScrollRef.current.getBoundingClientRect();
+    const mRect = messagesEndRef.current.getBoundingClientRect();
+    setShowScrollBottom(mRect.bottom > cRect.bottom + 50);
   }, []);
+
+  // Attach scroll listener to the inner messages scroll container
+  useEffect(() => {
+    if (!hasMessages) return;
+    const el = messageScrollRef?.current;
+    if (!el) return;
+    el.addEventListener('scroll', handleScroll);
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, [handleScroll, hasMessages]);
 
   const scrollToBottom = useCallback(() => {
     if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
   }, []);
 
   // Auto-scroll logic
   useEffect(() => {
     if (shouldAutoScrollRef.current && messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
   }, [messages.length, streamingText]);
 
@@ -103,7 +120,7 @@ export default function ChatWindow() {
   useEffect(() => {
     if (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
       shouldAutoScrollRef.current = true;
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
   }, [messages.length]);
 
@@ -153,7 +170,10 @@ export default function ChatWindow() {
     if (useChatStore.getState().isStreaming) handleCancelStream();
 
     let convId = activeConversationId;
-    if (!convId) convId = createConversation();
+    if (!convId) {
+      convId = createConversation(domain);
+      localStorage.setItem('voxa-active-id-' + domain, convId);
+    }
 
     const priorHistory = useChatStore.getState().conversations[convId]?.messages || [];
     addMessage(convId, { role: 'user', content: text, type, attachments });
@@ -185,9 +205,17 @@ export default function ChatWindow() {
         streamHandleRef.current = null;
       },
       priorHistory,
-      page
+      page,
+      dashboardContext
     );
   }, [activeConversationId, createConversation, addMessage, setLoading, startStreaming, appendToken, finalizeStream, cancelStream, handleCancelStream, removeLastAssistantMessage]);
+
+  /* ── External query trigger (AI suggestion cards) ── */
+  useEffect(() => {
+    const handler = (e) => sendTextAndStream(e.detail.text, 'text');
+    window.addEventListener('voxa:suggest-query', handler);
+    return () => window.removeEventListener('voxa:suggest-query', handler);
+  }, [sendTextAndStream]);
 
   const handlePageChange = useCallback((newPage, originalQuery) => {
     if (!activeConversationId) return;
@@ -310,39 +338,38 @@ export default function ChatWindow() {
         });
         streamHandleRef.current = null;
       },
-      history.slice(0, -1) // Send history excluding the message we just updated as 'current query'
+      history.slice(0, -1), // Send history excluding the message we just updated as 'current query'
+      1,
+      dashboardContext
     );
   }, [activeConversationId, addMessage, setLoading, startStreaming, appendToken, finalizeStream, cancelStream, handleCancelStream]);
 
-  // Welcome screen (no messages)
+  // Welcome screen (no messages) — flows naturally with the page
   if (!hasMessages) {
     return (
-      <div className="flex flex-col flex-1 h-full overflow-hidden" id="chat-window">
-        <div className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col" ref={messagesContainerRef} onScroll={handleScroll}>
-          <WelcomeScreen
-            onQueryClick={handleQueryClick}
-            onVoiceClick={handleVoiceToggle}
-            onTextSend={handleTextSend}
-            isRecording={isRecording}
-            isTranscribing={isTranscribing}
-            isBusy={isBusy}
-          />
-        </div>
+      <div className="flex flex-col" id="chat-window">
+        <WelcomeScreen
+          domain={domain}
+          onQueryClick={handleQueryClick}
+          onVoiceClick={handleVoiceToggle}
+          onTextSend={handleTextSend}
+          isRecording={isRecording}
+          isTranscribing={isTranscribing}
+          isBusy={isBusy}
+        />
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col flex-1 h-full overflow-hidden" id="chat-window">
-      {/* Messages scroll area */}
+    <div className="flex flex-col h-full" id="chat-window">
+      {/* Messages area — inner scroll; messages anchor to bottom via mt-auto */}
       <div
-        className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col"
+        className="flex flex-col flex-1 min-h-0 overflow-y-auto"
         id="chat-messages"
-        ref={messagesContainerRef}
-        onScroll={handleScroll}
+        ref={messageScrollRef}
       >
-        {/* Responsive padding: tight on mobile, comfortable on desktop */}
-        <div className="flex-1 flex flex-col py-4 px-2 sm:py-6 sm:px-4 md:px-8 gap-2 max-w-[1200px] w-full mx-auto">
+        <div className="flex flex-col mt-auto py-4 px-2 sm:py-6 sm:px-4 md:px-8 gap-2 max-w-[1200px] w-full mx-auto pb-6">
 
 
           {messages.map((msg, idx) => (
@@ -372,23 +399,25 @@ export default function ChatWindow() {
           {isLoading && !isStreaming && <TypingIndicator />}
           <div ref={messagesEndRef} />
         </div>
-
-        {showScrollBottom && (
-          <button
-            onClick={scrollToBottom}
-            className="fixed bottom-[100px] right-4 sm:right-6 z-30 w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[var(--surf)] border border-gold/[0.4] text-[#3B82F6] shadow-[0_4px_12px_rgba(0,0,0,0.4)] flex items-center justify-center hover:bg-[var(--surf-hover)] active:scale-90 transition-all duration-200 animate-fade-in"
-            title="Scroll to bottom"
-          >
-            <HiArrowDown size={16} />
-          </button>
-        )}
       </div>
 
-      {/* Input bar — safe-area aware, responsive padding */}
+      {/* Scroll-to-bottom button */}
+      {showScrollBottom && (
+        <button
+          onClick={scrollToBottom}
+          className="fixed bottom-[100px] right-4 sm:right-6 z-30 w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[var(--surf)] border flex items-center justify-center hover:bg-[var(--surf-hover)] active:scale-90 transition-all duration-200 animate-fade-in" style={{ borderColor: 'rgba(29,108,184,0.35)', color: '#4DBADF', boxShadow: '0 4px 12px rgba(29,108,184,0.25)' }}
+          title="Scroll to bottom"
+        >
+          <HiArrowDown size={16} />
+        </button>
+      )}
+
+      {/* Input bar — pinned to bottom of the flex column, safe-area aware */}
       <div
         className="
-          flex-shrink-0 bg-transparent flex flex-col items-center gap-2 w-full z-10
+          bg-[var(--bg)] flex flex-col items-center gap-2 w-full flex-shrink-0
           px-3 sm:px-5 md:px-8
+          pt-2
           pb-[calc(10px+env(safe-area-inset-bottom,0px))] sm:pb-4
         "
         id="chat-input-area"
@@ -429,7 +458,7 @@ export default function ChatWindow() {
           <TextInput onSend={handleTextSend} disabled={isBusy} />
         </div>
 
-        <p className="hidden md:block text-[11px] text-[var(--txt3)] opacity-60 text-center">
+        <p className="hidden md:block text-[11px] text-[var(--txt2)] text-center">
           Press Enter to send · Shift+Enter for new line
         </p>
       </div>
