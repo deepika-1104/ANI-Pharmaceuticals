@@ -24,7 +24,7 @@ const generateMsgId = () => `msg_${Date.now()}_${Math.random().toString(36).slic
  * Enforces the strict message schema.
  * Throws if required fields are missing or invalid.
  */
-function createMessage({ role, content, type, isError, pagination = null, attachments = null }) {
+function createMessage({ role, content, type, isError, pagination = null, attachments = null, citations = null }) {
   if (!['user', 'assistant'].includes(role)) {
     throw new Error(`Invalid message role: "${role}"`);
   }
@@ -46,6 +46,7 @@ function createMessage({ role, content, type, isError, pagination = null, attach
     createdAt: Date.now(),
     pagination: pagination || null,
     attachments: attachments || null,
+    citations: citations || null,
   };
 }
 
@@ -113,8 +114,8 @@ const useChatStore = create((set, get) => ({
     else sessionStorage.removeItem('voxa-session-active-id');
   },
 
-  addMessage: (conversationId, { role, content, type, isError, pagination, attachments }) => {
-    const msg = createMessage({ role, content, type, isError, pagination, attachments });
+  addMessage: (conversationId, { role, content, type, isError, pagination, attachments, citations }) => {
+    const msg = createMessage({ role, content, type, isError, pagination, attachments, citations });
 
     set((state) => {
       const conv = state.conversations[conversationId];
@@ -201,7 +202,7 @@ const useChatStore = create((set, get) => ({
   /**
    * Finalize stream — commit to messages, reset.
    */
-  finalizeStream: (streamId, finalMessage = null, pagination = null) => {
+  finalizeStream: (streamId, finalMessage = null, pagination = null, citations = null) => {
     const { streamingText, activeConversationId, activeStreamId } = get();
 
     // Ignore if from a stale stream
@@ -214,6 +215,7 @@ const useChatStore = create((set, get) => ({
         type: finalMessage.type || 'text',
         isError: !!finalMessage.isError,
         pagination,
+        citations,
       });
     } else if (streamingText && activeConversationId) {
       get().addMessage(activeConversationId, {
@@ -221,6 +223,7 @@ const useChatStore = create((set, get) => ({
         content: streamingText,
         type: 'text',
         pagination,
+        citations,
       });
       // addMessage already calls syncWithBackend
     }

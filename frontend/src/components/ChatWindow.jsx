@@ -169,7 +169,7 @@ export default function ChatWindow({ scrollContainerRef, domain = 'Production', 
     streamHandleRef.current = streamMessage(
       text, convId,
       (token) => { if (useChatStore.getState().isLoading) startStreaming(streamId); appendToken(token, streamId); },
-      (finalMessage, doneMeta) => { finalizeStream(streamId, finalMessage, doneMeta?.pagination || null); streamHandleRef.current = null; },
+      (finalMessage, doneMeta) => { finalizeStream(streamId, finalMessage, doneMeta?.pagination || null, doneMeta?.citations || null); streamHandleRef.current = null; },
       (err) => {
         console.error('Stream error:', err);
         cancelStream(); setLoading(false);
@@ -252,7 +252,7 @@ export default function ChatWindow({ scrollContainerRef, domain = 'Production', 
     streamHandleRef.current = streamMessage(
       newContent, activeConversationId,
       (token) => { if (useChatStore.getState().isLoading) startStreaming(streamId); appendToken(token, streamId); },
-      (finalMessage) => { finalizeStream(streamId, finalMessage); streamHandleRef.current = null; },
+      (finalMessage, doneMeta) => { finalizeStream(streamId, finalMessage, doneMeta?.pagination || null, doneMeta?.citations || null); streamHandleRef.current = null; },
       (err) => {
         console.error('Stream error:', err); cancelStream(); setLoading(false);
         addMessage(activeConversationId, { role: 'assistant', content: `Sorry, something went wrong: ${err.message || 'Unknown error'}. Please try again.`, type: 'text', isError: true });

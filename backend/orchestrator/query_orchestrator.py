@@ -536,6 +536,158 @@ class QueryOrchestrator:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
+    # ── Equipment / document listing intent classifier ────────────────────────
+
+    async def _classify_listing_intent(self, query: str) -> str:
+        """
+        Lightweight LLM call that returns either "equipment_listing" or "rag_query".
+        "equipment_listing" — the user wants to see what equipment or documents are
+                              available/indexed in the system.
+        "rag_query"        — the user is asking a specific question and expects an answer.
+        Returns "rag_query" on any error so the normal pipeline always runs as a fallback.
+        """
+        system = (
+            "You are a routing classifier. "
+            "Reply with ONLY one of these two tokens — no punctuation, no explanation:\n"
+            "  equipment_listing  — the user wants to see what equipment or documents "
+            "are available, indexed, or present in the system.\n"
+            "  rag_query          — the user is asking a specific question and expects "
+            "a direct answer from the documents."
+        )
+        try:
+            raw = self._llm.complete([
+                {"role": "system", "content": system},
+                {"role": "user", "content": query},
+            ])
+            token = raw.strip().lower().split()[0] if raw.strip() else "rag_query"
+            if token == "equipment_listing":
+                return "equipment_listing"
+        except Exception as exc:
+            logger.warning("[LISTING_CLASSIFY] LLM call failed: %s — defaulting to rag_query", exc)
+        return "rag_query"
+
+    # ── Shared equipment listing handler ──────────────────────────────────────
+
+    async def _handle_equipment_listing(
+        self,
+        query: str,
+        session_id: str,
+        dashboard_context: str,
+        pipeline_start: float,
+        timings: dict,
+    ):
+        """
+        Aggregate rag_documents and return a formatted markdown table.
+        Returns a StructuredResponse dict-like tuple (response_text, elapsed) or
+        raises RuntimeError when the DB is unavailable.
+
+        Scope filter rules:
+          enterprise  → no scope filter (show all)
+          production  → dashboard_scope in ["production", "quality"]
+          quality     → dashboard_scope == "quality"
+          (anything else) → no scope filter
+        """
+        import urllib.parse
+        from pathlib import Path
+
+        db = get_db()
+        if db is None:
+            elapsed = _ms(pipeline_start)
+            return compose(
+                "I'm sorry, I cannot retrieve the list right now because the database is unavailable.",
+                [], int(elapsed),
+                confidence=0.0, source="database", intent="document_listing",
+                followups=[], citations=[],
+                metadata={**timings, "intent": "document_listing"},
+            )
+
+        match_stage: dict = {"index_status": "indexed"}
+        ctx_lower = (dashboard_context or "").strip().lower()
+        if ctx_lower == "production":
+            match_stage["dashboard_scope"] = {"$in": ["production", "quality"]}
+        elif ctx_lower == "quality":
+            match_stage["dashboard_scope"] = "quality"
+        # "enterprise" or anything else → no scope filter
+
+        pipeline = [
+            {"$match": match_stage},
+            {
+                "$group": {
+                    "_id": "$equipment",
+                    "dashboard_scope": {"$first": "$dashboard_scope"},
+                    "document_types": {"$addToSet": "$document_type"},
+                    "files": {
+                        "$push": {
+                            "filename": "$filename",
+                            "source_url": "$source_url",
+                        }
+                    },
+                }
+            },
+            {"$sort": {"_id": 1}},
+        ]
+
+        cursor = db["rag_documents"].aggregate(pipeline)
+        groups = await cursor.to_list(length=100)
+
+        if not groups:
+            scope_label = ctx_lower if ctx_lower else "this"
+            msg = (
+                f"No documents are indexed for the {scope_label} scope yet. "
+                "Please upload and index documents before querying."
+            )
+            elapsed = _ms(pipeline_start)
+            self._update_context(session_id, query, msg, "document_listing", ["rag_documents"], None)
+            return compose(
+                msg, [], int(elapsed),
+                confidence=1.0, source="database", intent="document_listing",
+                followups=[], citations=[],
+                metadata={**timings, "intent": "document_listing"},
+            )
+
+        table_text = "| S.No | Equipment Name | Scope | Document Types Available | Documents & Links |\n"
+        table_text += "| :--- | :------------- | :---- | :----------------------- | :---------------- |\n"
+        for idx, group in enumerate(groups):
+            eq_name = group["_id"] or "General"
+
+            scope_raw = group.get("dashboard_scope") or "general"
+            scope_val = scope_raw.strip().lower()
+            scope = {
+                "quality": "QC",
+                "production": "Prod",
+                "general": "GEN",
+            }.get(scope_val, scope_raw.title())
+
+            types = ", ".join([t.title() for t in group.get("document_types", []) if t]) or "None"
+
+            unique_files: dict[str, str] = {}
+            for f in group.get("files", []):
+                fn = f.get("filename")
+                if fn and fn not in unique_files:
+                    unique_files[fn] = f.get("source_url") or ""
+
+            links = []
+            for fn, url_raw in unique_files.items():
+                readable_name = Path(fn).stem.replace("_", " ").replace("-", " ").title()
+                if url_raw:
+                    encoded_url = urllib.parse.quote(url_raw, safe="/:?=&")
+                    links.append(f"[{readable_name}]({encoded_url})")
+                else:
+                    links.append(readable_name)
+
+            # Join multiple links with escaped pipe so the table cell stays on one line
+            links_str = " \\| ".join(links) if links else "None"
+            table_text += f"| {idx + 1} | {eq_name} | {scope} | {types} | {links_str} |\n"
+
+        self._update_context(session_id, query, table_text, "document_listing", ["rag_documents"], None)
+        elapsed = _ms(pipeline_start)
+        return compose(
+            table_text, [], int(elapsed),
+            confidence=1.0, source="database", intent="document_listing",
+            followups=[], citations=[],
+            metadata={**timings, "intent": "document_listing"},
+        )
+
     async def process(
         self,
         query: str,
@@ -560,6 +712,15 @@ class QueryOrchestrator:
             )
 
         timings: dict[str, float] = {}
+
+        # Equipment / document listing detection via lightweight LLM classification
+        t_list = time.perf_counter()
+        listing_intent = await self._classify_listing_intent(query)
+        timings["listing_classify_ms"] = _ms(t_list)
+        if listing_intent == "equipment_listing":
+            return await self._handle_equipment_listing(
+                query, session_id, dashboard_context, pipeline_start, timings
+            )
 
         # Stage 0: reference resolution — resolve anaphoric references from session context.
         # Only applied to genuine follow-ups; standalone questions reset the topic
@@ -693,6 +854,28 @@ class QueryOrchestrator:
         # Stage 0: reference resolution — follow-ups only; standalone queries
         # reset the topic context (see process() for rationale)
         pipeline_start = time.perf_counter()
+
+        # Equipment / document listing detection via lightweight LLM classification
+        listing_intent = await self._classify_listing_intent(query)
+        if listing_intent == "equipment_listing":
+            result = await self._handle_equipment_listing(
+                query, session_id, dashboard_context, pipeline_start, {}
+            )
+            table_text = result.response
+            chunk_size = 15
+            for i in range(0, len(table_text), chunk_size):
+                yield table_text[i:i + chunk_size]
+                await asyncio.sleep(0.01)
+            self._last_stream_meta[session_id] = {
+                "intent": "document_listing",
+                "source": "database",
+                "confidence": 1.0,
+                "collections_used": ["rag_documents"],
+                "routing": "list_query",
+                "citations": [],
+            }
+            return
+
         _sess_ctx = self._ctx_store.get(session_id) if session_id else AnalyticalContext()
         if is_followup_query(query, _sess_ctx):
             resolved_query = resolve_references(query, _sess_ctx)
