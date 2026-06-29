@@ -736,14 +736,86 @@ class QueryOrchestrator:
                     "--- KNOWLEDGE BASE ---\n"
                     f"{rag_text}\n"
                     "--- END KNOWLEDGE BASE ---\n\n"
-                    "Answer the user's question based on the knowledge base above. "
-                    "If the answer is not present in the documents, say so clearly."
+                    "You must only answer using the provided knowledge base context above. "
+                    "If the context does not contain enough information to answer the question, "
+                    "respond with: 'I don't have information about this in the current knowledge "
+                    "base. Please upload the relevant document through the Knowledge Repository.' "
+                    "Do not use your training knowledge to fill gaps."
                 )
+                # Answer is derived from indexed documents — citations should be shown.
+                _fp_from_kb = True
+            elif intent == "domain_knowledge":
+                # No RAG chunks found. Check whether the query references specific
+                # equipment, model numbers, serial numbers, or document-specific terms
+                # that live in the knowledge base — if so, refuse to answer from training
+                # knowledge and tell the user the information is not in the KB.
+                _query_lower = resolved_query.lower()
+
+                # Pull known equipment names from rag_documents (single cheap query)
+                _kb_equipment: list[str] = []
+                try:
+                    _db = get_db()
+                    if _db is not None:
+                        _kb_equipment = await _db["rag_documents"].distinct("equipment")
+                except Exception:
+                    pass
+
+                # Equipment name match: any word/phrase from known equipment list
+                _equipment_hit = any(
+                    eq and eq.strip().lower() in _query_lower
+                    for eq in _kb_equipment
+                )
+
+                # Document-specific signal: model numbers, serial numbers, part codes,
+                # document IDs, version strings, SOP / IQ / OQ / PQ / FMEA references
+                import re as _re
+                _doc_ref_re = _re.compile(
+                    r"\b("
+                    r"[A-Z]{1,6}[-_]?\d{3,}"        # model/part codes: ABC-1234, SOP-001
+                    r"|s/n\s*\w+"                    # serial number prefix
+                    r"|serial\s*(no\.?|number)"      # "serial number"
+                    r"|model\s*(no\.?|number)"       # "model number"
+                    r"|rev(ision)?\s*[A-Z\d]"        # revision markers
+                    r"|v\d+\.\d+"                    # version strings: v1.2
+                    r"|sop|iq|oq|pq|fmea|urs|dq"    # common doc-type abbreviations
+                    r"|certificate\s+of\s+(analysis|compliance)"
+                    r"|batch\s+record|master\s+formula"
+                    r")\b",
+                    _re.I,
+                )
+                _doc_ref_hit = bool(_doc_ref_re.search(resolved_query))
+
+                if _equipment_hit or _doc_ref_hit:
+                    system = (
+                        "You are VOXA, an AI Assistant for ANI Pharmaceuticals.\n"
+                        "The user is asking about specific equipment, documents, or references "
+                        "that should be in the knowledge base, but no relevant documents were "
+                        "found for this query.\n\n"
+                        "You must NOT answer this question from your training knowledge. "
+                        "Respond with exactly this message, replacing [topic] with a short "
+                        "description of what was asked:\n\n"
+                        "\"I don't have information about [topic] in the current knowledge base. "
+                        "Please upload the relevant document through the Knowledge Repository.\"\n\n"
+                        "Do not elaborate, speculate, or provide any information from general knowledge."
+                    )
+                    logger.info(
+                        "[FAST_PATH] domain_knowledge no-RAG equipment/doc-ref match — "
+                        "using strict KB-only prompt | query=%r", resolved_query[:80],
+                    )
+                elif dashboard_context in _intents.SCOPED_FAST_PATH:
+                    _fp = _intents.SCOPED_FAST_PATH[dashboard_context]
+                    system = _fp.get(intent, _fp.get("conversational", _intents.FAST_PATH[intent]))
+                else:
+                    system = _intents.FAST_PATH[intent]
+                # No indexed document answered this query — no citation pills.
+                _fp_from_kb = False
             elif dashboard_context in _intents.SCOPED_FAST_PATH:
                 _fp = _intents.SCOPED_FAST_PATH[dashboard_context]
                 system = _fp.get(intent, _fp.get("conversational", _intents.FAST_PATH[intent]))
+                _fp_from_kb = False
             else:
                 system = _intents.FAST_PATH[intent]
+                _fp_from_kb = False
             msgs = [{"role": "system", "content": system}]
             if effective_history:
                 msgs.extend(effective_history[-8:])
@@ -763,7 +835,7 @@ class QueryOrchestrator:
                     llm=self._llm,
                 )
 
-            source = "rag_document" if rag_chunks_fp else "llm"
+            source = "rag_document" if _fp_from_kb else "llm"
             self._update_context(session_id, query, response_text, intent, [], None)
             elapsed = _ms(pipeline_start)
             logger.info(
@@ -774,7 +846,7 @@ class QueryOrchestrator:
                 response_text, [], int(elapsed),
                 confidence=1.0, source=source, intent=intent,
                 followups=followups,
-                citations=self._extract_citations(citation_map_fp, source_filenames_fp) if rag_chunks_fp else [],
+                citations=self._extract_citations(citation_map_fp, source_filenames_fp) if _fp_from_kb else [],
                 metadata={**timings, "intent": intent},
             )
 
@@ -964,14 +1036,80 @@ class QueryOrchestrator:
                     "--- KNOWLEDGE BASE ---\n"
                     f"{combined_kb}\n"
                     "--- END KNOWLEDGE BASE ---\n\n"
-                    "Answer the user's question based on the knowledge base above. "
-                    "If the answer is not present in the documents, say so clearly."
+                    "You must only answer using the provided knowledge base context above. "
+                    "If the context does not contain enough information to answer the question, "
+                    "respond with: 'I don't have information about this in the current knowledge "
+                    "base. Please upload the relevant document through the Knowledge Repository.' "
+                    "Do not use your training knowledge to fill gaps."
                 )
+                # Answer is derived from indexed documents — citations should be shown.
+                _fp_from_kb = True
+            elif intent == "domain_knowledge":
+                # No RAG chunks. Check for equipment names / doc-ref patterns — same
+                # logic as process() so the two paths stay in sync.
+                _query_lower = resolved_query.lower()
+
+                _kb_equipment: list[str] = []
+                try:
+                    _db = get_db()
+                    if _db is not None:
+                        _kb_equipment = await _db["rag_documents"].distinct("equipment")
+                except Exception:
+                    pass
+
+                _equipment_hit = any(
+                    eq and eq.strip().lower() in _query_lower
+                    for eq in _kb_equipment
+                )
+
+                import re as _re
+                _doc_ref_re = _re.compile(
+                    r"\b("
+                    r"[A-Z]{1,6}[-_]?\d{3,}"
+                    r"|s/n\s*\w+"
+                    r"|serial\s*(no\.?|number)"
+                    r"|model\s*(no\.?|number)"
+                    r"|rev(ision)?\s*[A-Z\d]"
+                    r"|v\d+\.\d+"
+                    r"|sop|iq|oq|pq|fmea|urs|dq"
+                    r"|certificate\s+of\s+(analysis|compliance)"
+                    r"|batch\s+record|master\s+formula"
+                    r")\b",
+                    _re.I,
+                )
+                _doc_ref_hit = bool(_doc_ref_re.search(resolved_query))
+
+                if _equipment_hit or _doc_ref_hit:
+                    system = (
+                        "You are VOXA, an AI Assistant for ANI Pharmaceuticals.\n"
+                        "The user is asking about specific equipment, documents, or references "
+                        "that should be in the knowledge base, but no relevant documents were "
+                        "found for this query.\n\n"
+                        "You must NOT answer this question from your training knowledge. "
+                        "Respond with exactly this message, replacing [topic] with a short "
+                        "description of what was asked:\n\n"
+                        "\"I don't have information about [topic] in the current knowledge base. "
+                        "Please upload the relevant document through the Knowledge Repository.\"\n\n"
+                        "Do not elaborate, speculate, or provide any information from general knowledge."
+                    )
+                    logger.info(
+                        "[FAST_PATH][STREAM] domain_knowledge no-RAG equipment/doc-ref match — "
+                        "using strict KB-only prompt | query=%r", resolved_query[:80],
+                    )
+                elif dashboard_context in _intents.SCOPED_FAST_PATH:
+                    _fp = _intents.SCOPED_FAST_PATH[dashboard_context]
+                    system = _fp.get(intent, _fp.get("conversational", _intents.FAST_PATH[intent]))
+                else:
+                    system = _intents.FAST_PATH[intent]
+                # No indexed document answered this query — no citation pills.
+                _fp_from_kb = False
             elif dashboard_context in _intents.SCOPED_FAST_PATH:
                 _fp = _intents.SCOPED_FAST_PATH[dashboard_context]
                 system = _fp.get(intent, _fp.get("conversational", _intents.FAST_PATH[intent]))
+                _fp_from_kb = False
             else:
                 system = _intents.FAST_PATH[intent]
+                _fp_from_kb = False
             msgs = [{"role": "system", "content": system}]
             if effective_history:
                 msgs.extend(effective_history[-8:])
@@ -984,15 +1122,15 @@ class QueryOrchestrator:
                 yield _PDF_NOTE
                 full.append(_PDF_NOTE)
             response_text_fp = "".join(full)
-            source_fp = "rag_document" if (rag_chunks_fp or _pdf_context_block) else "llm"
+            source_fp = "rag_document" if _fp_from_kb else "llm"
             self._update_context(session_id, query, response_text_fp, intent, [], None)
             self._last_stream_meta[session_id] = {
                 "intent": intent,
                 "source": source_fp,
                 "confidence": 1.0,
                 "collections_used": [],
-                "routing": "fast_path_rag" if (rag_chunks_fp or _pdf_context_block) else "fast_path",
-                "citations": _pdf_citations if _pdf_context_block else self._extract_citations(citation_map_fp, source_filenames_fp),
+                "routing": "fast_path_rag" if _fp_from_kb else "fast_path",
+                "citations": _pdf_citations if _pdf_context_block else (self._extract_citations(citation_map_fp, source_filenames_fp) if _fp_from_kb else []),
             }
             logger.info(
                 "[ORCHESTRATOR][STREAM] done intent=%s source=%s elapsed_ms=%.0f",
