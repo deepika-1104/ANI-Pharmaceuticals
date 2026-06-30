@@ -37,9 +37,7 @@ const DOMAIN_CONTEXT = {
 };
 
 export default function PharmaAIPage() {
-  const [selectedDomain, setSelectedDomain] = useState(
-    () => localStorage.getItem('voxa-selected-domain') || 'Enterprise'
-  );
+  const [selectedDomain, setSelectedDomain] = useState('Enterprise');
   const [docsOpen, setDocsOpen] = useState(false);
 
   const loadTheme             = useThemeStore((s) => s.loadTheme);
@@ -87,7 +85,7 @@ export default function PharmaAIPage() {
   useEffect(() => {
     loadTheme();
     loadFromCache().then(() => {
-      const currentDomain = localStorage.getItem('voxa-selected-domain') || 'Enterprise';
+      const currentDomain = 'Enterprise';
       const sessionId = sessionStorage.getItem('voxa-session-active-id');
       const { conversations } = useChatStore.getState();
       
