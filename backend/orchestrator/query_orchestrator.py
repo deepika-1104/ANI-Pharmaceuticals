@@ -44,6 +44,7 @@ from llm.client import LLMClient, get_llm_client
 from orchestrator.analytics_executor import run_analytics
 from orchestrator.collection_selector import select_collections
 from orchestrator.context_builder import build_analytics_context, build_context, build_merged_context, build_rag_context, build_rag_only_context
+from orchestrator.date_utils import find_date_field, resolve_time_range_to_filter
 from orchestrator.source_selector import compute_rag_confidence, select_context_source
 from orchestrator.followup_engine import generate_followups
 from orchestrator.intent_classifier import classify_intent
@@ -164,6 +165,25 @@ def _try_direct_count_response(
     Returns None when the query is too complex for direct generation (has top_records,
     group_by, or multiple aggregated metrics that need prose explanation).
     """
+    derived = [
+        metric
+        for data in analytics_results.values()
+        if isinstance(data, dict)
+        and "group_by" not in data
+        and "group_by_metrics" not in data
+        and "top_records" not in data
+        and "bottom_records" not in data
+        for metric in (data.get("derived_metrics") or [])
+    ]
+    if len(derived) == 1:
+        metric = derived[0]
+        pct = metric.get("percentage")
+        matched = metric.get("matched_count")
+        total = metric.get("total_count")
+        label = metric.get("label", "Rate")
+        if isinstance(pct, (int, float)) and isinstance(matched, int) and isinstance(total, int):
+            return f"{label} is {pct:,.2f}% ({matched:,} out of {total:,} records)."
+
     # Find collections where a real filter was applied and the result is just a count.
     # Skip collections with top_records/bottom_records — those need LLM narration to
     # present the actual record names meaningfully.
@@ -218,6 +238,50 @@ def _try_direct_count_response(
 
 import prompts.intents as _intents
 _NO_DATA_SYSTEM = _intents.NO_DATA
+
+
+# ── Dashboard-scope helpers ───────────────────────────────────────────────────
+
+def _get_collection_schema(
+    dashboard_context: str,
+    metadata: dict,
+) -> tuple[list[str], str]:
+    """
+    Return (fields, human_label) for the collection locked to *dashboard_context*.
+    Returns ([], '') when the context is unscoped (e.g. Enterprise).
+    Fields are sourced live from collection metadata — nothing is hardcoded.
+    """
+    if dashboard_context not in _intents.SCOPED_COLLECTION:
+        return [], ""
+    coll = _intents.SCOPED_COLLECTION[dashboard_context]
+    fields: list[str] = metadata.get(coll, {}).get("fields", [])
+    label: str = dashboard_context.replace("_", " ").title()
+    return fields, label
+
+
+def _build_scope_restriction(dashboard_context: str, metadata: dict) -> str:
+    """
+    Build a scope-enforcement instruction injected into the LLM narration prompt.
+    Tells the LLM exactly which collection's data it received and that it must
+    not invent or reference values from any other dataset.
+    Returns '' when the context is unscoped.
+    """
+    if dashboard_context not in _intents.SCOPED_COLLECTION:
+        return ""
+    coll = _intents.SCOPED_COLLECTION[dashboard_context]
+    label = dashboard_context.replace("_", " ").title()
+    fields: list[str] = metadata.get(coll, {}).get("fields", [])
+    fields_hint = f"\n  Available fields: {', '.join(fields)}." if fields else ""
+    return (
+        f"You are operating in the {label} Dashboard scope. "
+        f"The data above comes exclusively from the {coll} dataset.{fields_hint}\n"
+        f"CRITICAL SCOPE RULES:\n"
+        f"- Answer ONLY from the data provided in the DATA CONTEXT above.\n"
+        f"- Do NOT reference, invent, or substitute values from any other dataset or from general knowledge.\n"
+        f"- If a requested metric is not present in the data above, state clearly that it is not "
+        f"available in the {label} Dashboard.\n"
+        f"- Never hallucinate field values, counts, or percentages not present in the data."
+    )
 
 _COMPARISON_SUFFIX = (
     "\n\nNote: This is a COMPARISON query. Highlight differences, deltas, and "
@@ -290,185 +354,10 @@ def _build_exact_filter(filters: dict, fields: list[str]) -> dict:
     return resolved
 
 
-def _find_date_field(fields: list) -> Optional[str]:
-    """
-    Detect the primary date field from a collection's field list.
-    Checks known names in priority order, then falls back to any field containing 'date'.
-    """
-    _PRIORITY = [
-        "record_date", "date", "appointment_date", "operation_date",
-        "inspection_date", "billing_date", "scheduled_date", "discharge_date",
-        "admit_date", "created_at", "updated_at", "timestamp",
-    ]
-    fields_lower = {f.lower(): f for f in fields}
-    for name in _PRIORITY:
-        if name in fields_lower:
-            return fields_lower[name]
-    for f in fields:
-        if "date" in f.lower():
-            return f
-    return None
-
-
-def _resolve_time_range_to_filter(time_range: str, date_field: str) -> dict:
-    """
-    Convert a natural-language time_range string into a MongoDB date range filter.
-    Uses datetime.today() as the live reference — no hardcoded dates.
-    Supports: next/last N days/weeks/months/years, this/last week/month/year,
-              today, yesterday, Q1-Q4 YYYY, month-name YYYY, plain year, specific dates.
-    """
-    import calendar as _cal
-    from datetime import date, timedelta
-    import re as _re
-
-    today = date.today()
-    tr = time_range.lower().strip()
-
-    # next N days/weeks/months/years
-    m = _re.match(r"next\s+(\d+)\s+(day|week|month|year)s?", tr)
-    if m:
-        n, unit = int(m.group(1)), m.group(2)
-        start = today + timedelta(days=1)
-        if unit == "day":
-            end = today + timedelta(days=n)
-        elif unit == "week":
-            end = today + timedelta(weeks=n)
-        elif unit == "month":
-            end = today + timedelta(days=n * 30)
-        else:
-            end = today + timedelta(days=n * 365)
-        return {date_field: {"$gte": str(start), "$lte": str(end)}}
-
-    # last/past N days/weeks/months/years
-    m = _re.match(r"(?:last|past)\s+(\d+)\s+(day|week|month|year)s?", tr)
-    if m:
-        n, unit = int(m.group(1)), m.group(2)
-        end = today
-        if unit == "day":
-            start = today - timedelta(days=n)
-        elif unit == "week":
-            start = today - timedelta(weeks=n)
-        elif unit == "month":
-            start = today - timedelta(days=n * 30)
-        else:
-            start = today - timedelta(days=n * 365)
-        return {date_field: {"$gte": str(start), "$lte": str(end)}}
-
-    # today / yesterday
-    if tr == "today":
-        return {date_field: {"$gte": str(today), "$lte": str(today)}}
-    if tr == "yesterday":
-        yd = today - timedelta(days=1)
-        return {date_field: {"$gte": str(yd), "$lte": str(yd)}}
-
-    # this week (Mon–Sun)
-    if tr == "this week":
-        start = today - timedelta(days=today.weekday())
-        end = start + timedelta(days=6)
-        return {date_field: {"$gte": str(start), "$lte": str(end)}}
-
-    # last week / previous week
-    if tr in ("last week", "previous week"):
-        start = today - timedelta(days=today.weekday() + 7)
-        end = start + timedelta(days=6)
-        return {date_field: {"$gte": str(start), "$lte": str(end)}}
-
-    # next week
-    if tr == "next week":
-        start = today + timedelta(days=7 - today.weekday())
-        end = start + timedelta(days=6)
-        return {date_field: {"$gte": str(start), "$lte": str(end)}}
-
-    # this month
-    if tr == "this month":
-        start = today.replace(day=1)
-        end = today.replace(day=_cal.monthrange(today.year, today.month)[1])
-        return {date_field: {"$gte": str(start), "$lte": str(end)}}
-
-    # last month / previous month
-    if tr in ("last month", "previous month"):
-        first_this = today.replace(day=1)
-        end = first_this - timedelta(days=1)
-        start = end.replace(day=1)
-        return {date_field: {"$gte": str(start), "$lte": str(end)}}
-
-    # next month
-    if tr == "next month":
-        if today.month == 12:
-            start = today.replace(year=today.year + 1, month=1, day=1)
-        else:
-            start = today.replace(month=today.month + 1, day=1)
-        end = start.replace(day=_cal.monthrange(start.year, start.month)[1])
-        return {date_field: {"$gte": str(start), "$lte": str(end)}}
-
-    # this quarter
-    if tr == "this quarter":
-        q = (today.month - 1) // 3
-        q_start_month = q * 3 + 1
-        q_end_month = q_start_month + 2
-        start = today.replace(month=q_start_month, day=1)
-        end = today.replace(month=q_end_month, day=_cal.monthrange(today.year, q_end_month)[1])
-        return {date_field: {"$gte": str(start), "$lte": str(end)}}
-
-    # this year
-    if tr == "this year":
-        return {date_field: {"$gte": f"{today.year}-01-01", "$lte": f"{today.year}-12-31"}}
-
-    # last year / previous year
-    if tr in ("last year", "previous year"):
-        y = today.year - 1
-        return {date_field: {"$gte": f"{y}-01-01", "$lte": f"{y}-12-31"}}
-
-    # next year
-    if tr == "next year":
-        y = today.year + 1
-        return {date_field: {"$gte": f"{y}-01-01", "$lte": f"{y}-12-31"}}
-
-    # Q1-Q4 YYYY (e.g. "Q2 2026")
-    m = _re.match(r"q([1-4])\s*(\d{4})", tr)
-    if m:
-        q, year = int(m.group(1)), int(m.group(2))
-        q_start_month = (q - 1) * 3 + 1
-        q_end_month = q * 3
-        start = date(year, q_start_month, 1)
-        end = date(year, q_end_month, _cal.monthrange(year, q_end_month)[1])
-        return {date_field: {"$gte": str(start), "$lte": str(end)}}
-
-    # Month name + optional year (e.g. "june 2026", "january")
-    _MONTHS = {
-        "january": 1, "february": 2, "march": 3, "april": 4,
-        "may": 5, "june": 6, "july": 7, "august": 8,
-        "september": 9, "october": 10, "november": 11, "december": 12,
-    }
-    m = _re.match(r"(" + "|".join(_MONTHS) + r")(?:\s+(\d{4}))?", tr)
-    if m:
-        month_num = _MONTHS[m.group(1)]
-        year = int(m.group(2)) if m.group(2) else today.year
-        start = date(year, month_num, 1)
-        end = date(year, month_num, _cal.monthrange(year, month_num)[1])
-        return {date_field: {"$gte": str(start), "$lte": str(end)}}
-
-    # Plain year (e.g. "2026")
-    m = _re.match(r"^((?:19|20)\d{2})$", tr)
-    if m:
-        year = int(m.group(1))
-        return {date_field: {"$gte": f"{year}-01-01", "$lte": f"{year}-12-31"}}
-
-    # Specific date: DD/MM/YYYY or MM/DD/YYYY (a > 12 forces day-first)
-    m = _re.match(r"(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?", tr)
-    if m:
-        try:
-            a, b = int(m.group(1)), int(m.group(2))
-            year = int(m.group(3)) if m.group(3) else today.year
-            if year < 100:
-                year += 2000
-            d = date(year, b, a) if a > 12 else date(year, a, b)
-            return {date_field: {"$gte": str(d), "$lte": str(d)}}
-        except ValueError:
-            pass
-
-    logger.debug("[TIME_FILTER] unrecognised time_range %r — no date filter applied", time_range)
-    return {}
+# _find_date_field and _resolve_time_range_to_filter are now in date_utils.
+# Keep local aliases so existing call sites below don't need changing.
+_find_date_field = find_date_field
+_resolve_time_range_to_filter = resolve_time_range_to_filter
 
 
 class QueryOrchestrator:
@@ -536,6 +425,128 @@ class QueryOrchestrator:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
+    # ── Shared equipment listing handler ──────────────────────────────────────
+
+    async def _handle_equipment_listing(
+        self,
+        query: str,
+        session_id: str,
+        dashboard_context: str,
+        pipeline_start: float,
+        timings: dict,
+    ):
+        """
+        Aggregate rag_documents and return a formatted markdown table.
+        Returns a StructuredResponse dict-like tuple (response_text, elapsed) or
+        raises RuntimeError when the DB is unavailable.
+
+        Scope filter rules:
+          enterprise  → no scope filter (show all)
+          production  → dashboard_scope in ["production", "quality"]
+          quality     → dashboard_scope == "quality"
+          (anything else) → no scope filter
+        """
+        import urllib.parse
+        from pathlib import Path
+
+        db = get_db()
+        if db is None:
+            elapsed = _ms(pipeline_start)
+            return compose(
+                "I'm sorry, I cannot retrieve the list right now because the database is unavailable.",
+                [], int(elapsed),
+                confidence=0.0, source="database", intent="document_listing",
+                followups=[], citations=[],
+                metadata={**timings, "intent": "document_listing"},
+            )
+
+        match_stage: dict = {"index_status": "indexed"}
+        ctx_lower = (dashboard_context or "").strip().lower()
+        if ctx_lower == "production":
+            match_stage["dashboard_scope"] = {"$in": ["production", "quality"]}
+        elif ctx_lower == "quality":
+            match_stage["dashboard_scope"] = "quality"
+        # "enterprise" or anything else → no scope filter
+
+        pipeline = [
+            {"$match": match_stage},
+            {
+                "$group": {
+                    "_id": "$equipment",
+                    "dashboard_scope": {"$first": "$dashboard_scope"},
+                    "document_types": {"$addToSet": "$document_type"},
+                    "files": {
+                        "$push": {
+                            "filename": "$filename",
+                            "source_url": "$source_url",
+                        }
+                    },
+                }
+            },
+            {"$sort": {"_id": 1}},
+        ]
+
+        cursor = db["rag_documents"].aggregate(pipeline)
+        groups = await cursor.to_list(length=100)
+
+        if not groups:
+            scope_label = ctx_lower if ctx_lower else "this"
+            msg = (
+                f"No documents are indexed for the {scope_label} scope yet. "
+                "Please upload and index documents before querying."
+            )
+            elapsed = _ms(pipeline_start)
+            self._update_context(session_id, query, msg, "document_listing", ["rag_documents"], None)
+            return compose(
+                msg, [], int(elapsed),
+                confidence=1.0, source="database", intent="document_listing",
+                followups=[], citations=[],
+                metadata={**timings, "intent": "document_listing"},
+            )
+
+        table_text = "| S.No | Equipment Name | Scope | Document Types Available | Documents & Links |\n"
+        table_text += "| :--- | :------------- | :---- | :----------------------- | :---------------- |\n"
+        for idx, group in enumerate(groups):
+            eq_name = group["_id"] or "General"
+
+            scope_raw = group.get("dashboard_scope") or "general"
+            scope_val = scope_raw.strip().lower()
+            scope = {
+                "quality": "QC",
+                "production": "Prod",
+                "general": "GEN",
+            }.get(scope_val, scope_raw.title())
+
+            types = ", ".join([t.title() for t in group.get("document_types", []) if t]) or "None"
+
+            unique_files: dict[str, str] = {}
+            for f in group.get("files", []):
+                fn = f.get("filename")
+                if fn and fn not in unique_files:
+                    unique_files[fn] = f.get("source_url") or ""
+
+            links = []
+            for fn, url_raw in unique_files.items():
+                readable_name = Path(fn).stem.replace("_", " ").replace("-", " ").title()
+                if url_raw:
+                    encoded_url = urllib.parse.quote(url_raw, safe="/:?=&")
+                    links.append(f"[{readable_name}]({encoded_url})")
+                else:
+                    links.append(readable_name)
+
+            # Join multiple links with escaped pipe so the table cell stays on one line
+            links_str = " \\| ".join(links) if links else "None"
+            table_text += f"| {idx + 1} | {eq_name} | {scope} | {types} | {links_str} |\n"
+
+        self._update_context(session_id, query, table_text, "document_listing", ["rag_documents"], None)
+        elapsed = _ms(pipeline_start)
+        return compose(
+            table_text, [], int(elapsed),
+            confidence=1.0, source="database", intent="document_listing",
+            followups=[], citations=[],
+            metadata={**timings, "intent": "document_listing"},
+        )
+
     async def process(
         self,
         query: str,
@@ -566,6 +577,15 @@ class QueryOrchestrator:
         # context so stale entities/time ranges never leak into them.
         t0 = time.perf_counter()
         _sess_ctx = self._ctx_store.get(session_id) if session_id else AnalyticalContext()
+
+        # If the user has switched dashboards, clear stale collection context immediately
+        # so references from the previous dashboard never contaminate the new scope.
+        if session_id and dashboard_context in _intents.SCOPED_COLLECTION:
+            _expected_coll = _intents.SCOPED_COLLECTION[dashboard_context]
+            if _sess_ctx.active_collections and _expected_coll not in _sess_ctx.active_collections:
+                self._ctx_store.reset_topic(session_id)
+                _sess_ctx = self._ctx_store.get(session_id)
+
         if is_followup_query(query, _sess_ctx):
             resolved_query = resolve_references(query, _sess_ctx)
         else:
@@ -576,7 +596,11 @@ class QueryOrchestrator:
         timings["reference_resolution_ms"] = _ms(t0)
         # ── Stage 1: Query normalization ──────────────────────────────────────
         t1 = time.perf_counter()
-        query_meta = await normalize_query(resolved_query, self._llm)
+        _schema_fields, _dash_label = _get_collection_schema(dashboard_context, self._metadata)
+        query_meta = await normalize_query(
+            resolved_query, self._llm,
+            schema_fields=_schema_fields, dashboard_label=_dash_label,
+        )
         timings["query_normalization_ms"] = _ms(t1)
         logger.info(
             "[STAGE 1] normalized: metrics=%s filters=%s time=%s",
@@ -591,6 +615,12 @@ class QueryOrchestrator:
             "[STAGE 2] intent=%s session=%s elapsed_ms=%.0f",
             intent, session_id, timings["intent_classification_ms"],
         )
+
+        # ── Equipment listing — short-circuit before DB pipeline ──────────────
+        if intent == "equipment_listing":
+            return await self._handle_equipment_listing(
+                query, session_id, dashboard_context, pipeline_start, timings
+            )
 
         # ── Fast paths (no DB) ────────────────────────────────────────────────
         if intent in ("conversational", "domain_knowledge", "workflow_automation"):
@@ -608,14 +638,86 @@ class QueryOrchestrator:
                     "--- KNOWLEDGE BASE ---\n"
                     f"{rag_text}\n"
                     "--- END KNOWLEDGE BASE ---\n\n"
-                    "Answer the user's question based on the knowledge base above. "
-                    "If the answer is not present in the documents, say so clearly."
+                    "You must only answer using the provided knowledge base context above. "
+                    "If the context does not contain enough information to answer the question, "
+                    "respond with: 'I don't have information about this in the current knowledge "
+                    "base. Please upload the relevant document through the Knowledge Repository.' "
+                    "Do not use your training knowledge to fill gaps."
                 )
+                # Answer is derived from indexed documents — citations should be shown.
+                _fp_from_kb = True
+            elif intent == "domain_knowledge":
+                # No RAG chunks found. Check whether the query references specific
+                # equipment, model numbers, serial numbers, or document-specific terms
+                # that live in the knowledge base — if so, refuse to answer from training
+                # knowledge and tell the user the information is not in the KB.
+                _query_lower = resolved_query.lower()
+
+                # Pull known equipment names from rag_documents (single cheap query)
+                _kb_equipment: list[str] = []
+                try:
+                    _db = get_db()
+                    if _db is not None:
+                        _kb_equipment = await _db["rag_documents"].distinct("equipment")
+                except Exception:
+                    pass
+
+                # Equipment name match: any word/phrase from known equipment list
+                _equipment_hit = any(
+                    eq and eq.strip().lower() in _query_lower
+                    for eq in _kb_equipment
+                )
+
+                # Document-specific signal: model numbers, serial numbers, part codes,
+                # document IDs, version strings, SOP / IQ / OQ / PQ / FMEA references
+                import re as _re
+                _doc_ref_re = _re.compile(
+                    r"\b("
+                    r"[A-Z]{1,6}[-_]?\d{3,}"        # model/part codes: ABC-1234, SOP-001
+                    r"|s/n\s*\w+"                    # serial number prefix
+                    r"|serial\s*(no\.?|number)"      # "serial number"
+                    r"|model\s*(no\.?|number)"       # "model number"
+                    r"|rev(ision)?\s*[A-Z\d]"        # revision markers
+                    r"|v\d+\.\d+"                    # version strings: v1.2
+                    r"|sop|iq|oq|pq|fmea|urs|dq"    # common doc-type abbreviations
+                    r"|certificate\s+of\s+(analysis|compliance)"
+                    r"|batch\s+record|master\s+formula"
+                    r")\b",
+                    _re.I,
+                )
+                _doc_ref_hit = bool(_doc_ref_re.search(resolved_query))
+
+                if _equipment_hit or _doc_ref_hit:
+                    system = (
+                        "You are VOXA, an AI Assistant for ANI Pharmaceuticals.\n"
+                        "The user is asking about specific equipment, documents, or references "
+                        "that should be in the knowledge base, but no relevant documents were "
+                        "found for this query.\n\n"
+                        "You must NOT answer this question from your training knowledge. "
+                        "Respond with exactly this message, replacing [topic] with a short "
+                        "description of what was asked:\n\n"
+                        "\"I don't have information about [topic] in the current knowledge base. "
+                        "Please upload the relevant document through the Knowledge Repository.\"\n\n"
+                        "Do not elaborate, speculate, or provide any information from general knowledge."
+                    )
+                    logger.info(
+                        "[FAST_PATH] domain_knowledge no-RAG equipment/doc-ref match — "
+                        "using strict KB-only prompt | query=%r", resolved_query[:80],
+                    )
+                elif dashboard_context in _intents.SCOPED_FAST_PATH:
+                    _fp = _intents.SCOPED_FAST_PATH[dashboard_context]
+                    system = _fp.get(intent, _fp.get("conversational", _intents.FAST_PATH[intent]))
+                else:
+                    system = _intents.FAST_PATH[intent]
+                # No indexed document answered this query — no citation pills.
+                _fp_from_kb = False
             elif dashboard_context in _intents.SCOPED_FAST_PATH:
                 _fp = _intents.SCOPED_FAST_PATH[dashboard_context]
                 system = _fp.get(intent, _fp.get("conversational", _intents.FAST_PATH[intent]))
+                _fp_from_kb = False
             else:
                 system = _intents.FAST_PATH[intent]
+                _fp_from_kb = False
             msgs = [{"role": "system", "content": system}]
             if effective_history:
                 msgs.extend(effective_history[-8:])
@@ -635,7 +737,7 @@ class QueryOrchestrator:
                     llm=self._llm,
                 )
 
-            source = "rag_document" if rag_chunks_fp else "llm"
+            source = "rag_document" if _fp_from_kb else "llm"
             self._update_context(session_id, query, response_text, intent, [], None)
             elapsed = _ms(pipeline_start)
             logger.info(
@@ -646,7 +748,7 @@ class QueryOrchestrator:
                 response_text, [], int(elapsed),
                 confidence=1.0, source=source, intent=intent,
                 followups=followups,
-                citations=self._extract_citations(citation_map_fp, source_filenames_fp) if rag_chunks_fp else [],
+                citations=self._extract_citations(citation_map_fp, source_filenames_fp) if _fp_from_kb else [],
                 metadata={**timings, "intent": intent},
             )
 
@@ -682,6 +784,7 @@ class QueryOrchestrator:
         user_id: str = "",
         org_id: str = "",
         dashboard_context: str = "",
+        pdf_attachments: Optional[list[dict]] = None,
     ) -> AsyncGenerator[str, None]:
         """Streaming pipeline — yields LLM tokens as they arrive."""
         await self._ensure_ready()
@@ -690,10 +793,89 @@ class QueryOrchestrator:
             yield "I didn't receive a question. What would you like to know about your data?"
             return
 
-        # Stage 0: reference resolution — follow-ups only; standalone queries
+        # ── Stage 0: reference resolution — follow-ups only; standalone queries
         # reset the topic context (see process() for rationale)
         pipeline_start = time.perf_counter()
+
+        # ── PDF attachment handling ───────────────────────────────────────────
+        # Decode, extract text, and chunk each PDF for this session only.
+        # Nothing is written to MongoDB, Supabase, or any persistent store.
+        session_pdf_chunks: list[str] = []
+        if pdf_attachments:
+            import base64
+            import fitz  # PyMuPDF
+            from rag.chunker import chunk_text
+            from rag.extractor import ChunkStrategy
+            from config.settings import RAG_CHUNK_SIZE, RAG_CHUNK_OVERLAP
+
+            for pdf in pdf_attachments:
+                raw_b64: str = pdf.get("base64Data", "")
+                if not raw_b64:
+                    continue
+                # Strip the data-URL prefix (data:application/pdf;base64,<data>)
+                if "," in raw_b64:
+                    raw_b64 = raw_b64.split(",", 1)[1]
+                try:
+                    pdf_bytes = base64.b64decode(raw_b64)
+                    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                    page_count = doc.page_count
+                    full_text = "\n\n".join(page_obj.get_text() for page_obj in doc)
+                    doc.close()
+                    chunks = chunk_text(
+                        full_text,
+                        strategy=ChunkStrategy.SECTION,
+                        chunk_size=RAG_CHUNK_SIZE,
+                        overlap=RAG_CHUNK_OVERLAP,
+                    )
+                    session_pdf_chunks.extend(chunks)
+                    logger.info(
+                        "[PDF_ATTACH] '%s' → %d pages, %d chunks (session-only)",
+                        pdf.get("name", "unknown"), page_count, len(chunks),
+                    )
+                except Exception as exc:
+                    logger.warning("[PDF_ATTACH] failed to extract '%s': %s", pdf.get("name", "?"), exc)
+
+        # Build a single context block from all PDF chunks to prepend into system prompts
+        _pdf_context_block = ""
+        _pdf_citations: list[dict] = []
+        _PDF_NOTE = (
+            "\n\n*Note: This answer was based on your attached document. "
+            "To ask follow-up questions, please re-attach the PDF.*"
+        )
+        if session_pdf_chunks:
+            _pdf_ctx_text = "\n\n".join(session_pdf_chunks)
+            _pdf_context_block = (
+                "--- ATTACHED DOCUMENT CONTEXT (session-only, not persisted) ---\n"
+                f"{_pdf_ctx_text}\n"
+                "--- END ATTACHED DOCUMENT CONTEXT ---\n\n"
+            )
+            # Build citation entries from the original PDF filenames so citation
+            # pills reflect the actual source used to answer the query.
+            _pdf_citations = [
+                {
+                    "filename": pdf.get("name", "attachment.pdf"),
+                    "source_url": "",
+                    "equipment_name": "",
+                    "document_type": "Attached Document",
+                }
+                for pdf in (pdf_attachments or [])
+                if pdf.get("base64Data") or pdf.get("name")
+            ]
+            logger.info(
+                "[PDF_ATTACH] context block ready: %d chunks, %d citation(s)",
+                len(session_pdf_chunks), len(_pdf_citations),
+            )
+
         _sess_ctx = self._ctx_store.get(session_id) if session_id else AnalyticalContext()
+
+        # If the user has switched dashboards, clear stale collection context immediately
+        # so references from the previous dashboard never contaminate the new scope.
+        if session_id and dashboard_context in _intents.SCOPED_COLLECTION:
+            _expected_coll = _intents.SCOPED_COLLECTION[dashboard_context]
+            if _sess_ctx.active_collections and _expected_coll not in _sess_ctx.active_collections:
+                self._ctx_store.reset_topic(session_id)
+                _sess_ctx = self._ctx_store.get(session_id)
+
         if is_followup_query(query, _sess_ctx):
             resolved_query = resolve_references(query, _sess_ctx)
         else:
@@ -702,41 +884,148 @@ class QueryOrchestrator:
             resolved_query = query
         effective_history = conversation_history or []
 
-        # Stage 1: Query normalization (run with intent classification in parallel)
+        # Stage 1-2: Query normalization + intent classification.
+        # When PDF attachments are present, skip classification entirely and use
+        # data_query so the PDF context drives the response without the overhead
+        # of a second LLM round-trip.
         t12 = time.perf_counter()
-        query_meta, intent = await asyncio.gather(
-            normalize_query(resolved_query, self._llm),
-            classify_intent(resolved_query, self._llm),
-        )
-        logger.info(
-            "[STAGE 1-2][STREAM] normalize+intent_ms=%.0f intent=%s metrics=%s",
-            _ms(t12), intent, query_meta.metrics,
-        )
+
+        _schema_fields, _dash_label = _get_collection_schema(dashboard_context, self._metadata)
+        _scope_restr = _build_scope_restriction(dashboard_context, self._metadata)
+        if _pdf_context_block:
+            query_meta = await normalize_query(
+                resolved_query, self._llm, schema_fields=_schema_fields, dashboard_label=_dash_label
+            )
+            intent = "data_query"
+            logger.info(
+                "[STAGE 1-2][STREAM] PDF present — normalize_ms=%.0f intent=data_query (forced)",
+                _ms(t12),
+            )
+        else:
+            query_meta, intent = await asyncio.gather(
+                normalize_query(resolved_query, self._llm, schema_fields=_schema_fields, dashboard_label=_dash_label),
+                classify_intent(resolved_query, self._llm),
+            )
+            logger.info(
+                "[STAGE 1-2][STREAM] normalize+intent_ms=%.0f intent=%s metrics=%s",
+                _ms(t12), intent, query_meta.metrics,
+            )
+
+        # ── Equipment listing — short-circuit before DB pipeline ──────────────
+        if intent == "equipment_listing":
+            result = await self._handle_equipment_listing(
+                query, session_id, dashboard_context, pipeline_start, {}
+            )
+            table_text = result.response
+            chunk_size = 15
+            for i in range(0, len(table_text), chunk_size):
+                yield table_text[i:i + chunk_size]
+                await asyncio.sleep(0.01)
+            self._last_stream_meta[session_id] = {
+                "intent": "document_listing",
+                "source": "database",
+                "confidence": 1.0,
+                "collections_used": ["rag_documents"],
+                "routing": "equipment_listing",
+                "citations": [],
+            }
+            return
 
         # Fast paths
         if intent in ("conversational", "domain_knowledge", "workflow_automation"):
-            # Always check RAG before taking the fast path — the user may have
+            # When a PDF is attached, use it exclusively — skip RAG retrieval entirely.
+            # Otherwise always check RAG before the fast path in case the user has
             # uploaded documents that answer this question directly.
-            _fp_vector = await get_query_embedding(resolved_query) if user_id else None
-            rag_chunks_fp, source_filenames_fp, citation_map_fp = await self._fetch_rag_chunks(
-                resolved_query, _fp_vector, user_id, RAG_TOP_K, org_id=org_id, intent=intent
-            )
-            if rag_chunks_fp:
-                rag_text = build_rag_context(rag_chunks_fp)
+            if _pdf_context_block:
+                rag_chunks_fp, source_filenames_fp, citation_map_fp = [], [], {}
+            else:
+                _fp_vector = await get_query_embedding(resolved_query) if user_id else None
+                rag_chunks_fp, source_filenames_fp, citation_map_fp = await self._fetch_rag_chunks(
+                    resolved_query, _fp_vector, user_id, RAG_TOP_K, org_id=org_id, intent=intent
+                )
+            if rag_chunks_fp or _pdf_context_block:
+                rag_text = build_rag_context(rag_chunks_fp) if rag_chunks_fp else ""
+                combined_kb = _pdf_context_block + rag_text if _pdf_context_block else rag_text
                 system = (
                     "You are VOXA, an AI Assistant. The user has uploaded knowledge documents "
                     "that are relevant to this question.\n\n"
                     "--- KNOWLEDGE BASE ---\n"
-                    f"{rag_text}\n"
+                    f"{combined_kb}\n"
                     "--- END KNOWLEDGE BASE ---\n\n"
-                    "Answer the user's question based on the knowledge base above. "
-                    "If the answer is not present in the documents, say so clearly."
+                    "You must only answer using the provided knowledge base context above. "
+                    "If the context does not contain enough information to answer the question, "
+                    "respond with: 'I don't have information about this in the current knowledge "
+                    "base. Please upload the relevant document through the Knowledge Repository.' "
+                    "Do not use your training knowledge to fill gaps."
                 )
+                # Answer is derived from indexed documents — citations should be shown.
+                _fp_from_kb = True
+            elif intent == "domain_knowledge":
+                # No RAG chunks. Check for equipment names / doc-ref patterns — same
+                # logic as process() so the two paths stay in sync.
+                _query_lower = resolved_query.lower()
+
+                _kb_equipment: list[str] = []
+                try:
+                    _db = get_db()
+                    if _db is not None:
+                        _kb_equipment = await _db["rag_documents"].distinct("equipment")
+                except Exception:
+                    pass
+
+                _equipment_hit = any(
+                    eq and eq.strip().lower() in _query_lower
+                    for eq in _kb_equipment
+                )
+
+                import re as _re
+                _doc_ref_re = _re.compile(
+                    r"\b("
+                    r"[A-Z]{1,6}[-_]?\d{3,}"
+                    r"|s/n\s*\w+"
+                    r"|serial\s*(no\.?|number)"
+                    r"|model\s*(no\.?|number)"
+                    r"|rev(ision)?\s*[A-Z\d]"
+                    r"|v\d+\.\d+"
+                    r"|sop|iq|oq|pq|fmea|urs|dq"
+                    r"|certificate\s+of\s+(analysis|compliance)"
+                    r"|batch\s+record|master\s+formula"
+                    r")\b",
+                    _re.I,
+                )
+                _doc_ref_hit = bool(_doc_ref_re.search(resolved_query))
+
+                if _equipment_hit or _doc_ref_hit:
+                    system = (
+                        "You are VOXA, an AI Assistant for ANI Pharmaceuticals.\n"
+                        "The user is asking about specific equipment, documents, or references "
+                        "that should be in the knowledge base, but no relevant documents were "
+                        "found for this query.\n\n"
+                        "You must NOT answer this question from your training knowledge. "
+                        "Respond with exactly this message, replacing [topic] with a short "
+                        "description of what was asked:\n\n"
+                        "\"I don't have information about [topic] in the current knowledge base. "
+                        "Please upload the relevant document through the Knowledge Repository.\"\n\n"
+                        "Do not elaborate, speculate, or provide any information from general knowledge."
+                    )
+                    logger.info(
+                        "[FAST_PATH][STREAM] domain_knowledge no-RAG equipment/doc-ref match — "
+                        "using strict KB-only prompt | query=%r", resolved_query[:80],
+                    )
+                elif dashboard_context in _intents.SCOPED_FAST_PATH:
+                    _fp = _intents.SCOPED_FAST_PATH[dashboard_context]
+                    system = _fp.get(intent, _fp.get("conversational", _intents.FAST_PATH[intent]))
+                else:
+                    system = _intents.FAST_PATH[intent]
+                # No indexed document answered this query — no citation pills.
+                _fp_from_kb = False
             elif dashboard_context in _intents.SCOPED_FAST_PATH:
                 _fp = _intents.SCOPED_FAST_PATH[dashboard_context]
                 system = _fp.get(intent, _fp.get("conversational", _intents.FAST_PATH[intent]))
+                _fp_from_kb = False
             else:
                 system = _intents.FAST_PATH[intent]
+                _fp_from_kb = False
             msgs = [{"role": "system", "content": system}]
             if effective_history:
                 msgs.extend(effective_history[-8:])
@@ -745,16 +1034,19 @@ class QueryOrchestrator:
             async for token in self._llm.stream(msgs):
                 yield token
                 full.append(token)
+            if _pdf_context_block:
+                yield _PDF_NOTE
+                full.append(_PDF_NOTE)
             response_text_fp = "".join(full)
-            source_fp = "rag_document" if rag_chunks_fp else "llm"
+            source_fp = "rag_document" if _fp_from_kb else "llm"
             self._update_context(session_id, query, response_text_fp, intent, [], None)
             self._last_stream_meta[session_id] = {
                 "intent": intent,
                 "source": source_fp,
                 "confidence": 1.0,
                 "collections_used": [],
-                "routing": "fast_path_rag" if rag_chunks_fp else "fast_path",
-                "citations": self._extract_citations(citation_map_fp, source_filenames_fp) if rag_chunks_fp else [],
+                "routing": "fast_path_rag" if _fp_from_kb else "fast_path",
+                "citations": _pdf_citations if _pdf_context_block else (self._extract_citations(citation_map_fp, source_filenames_fp) if _fp_from_kb else []),
             }
             logger.info(
                 "[ORCHESTRATOR][STREAM] done intent=%s source=%s elapsed_ms=%.0f",
@@ -783,10 +1075,17 @@ class QueryOrchestrator:
             _ms(t4), combined_base, expanded_kw, "yes" if query_vector else "no",
         )
 
-        # Stage 5b: RAG retrieval — fired now, runs in parallel with Stage 5a below
-        rag_task = asyncio.ensure_future(
-            self._fetch_rag_chunks(resolved_query, query_vector, user_id, RAG_TOP_K, org_id=org_id, intent=intent)
-        )
+        # Stage 5b: RAG retrieval — skipped when a PDF attachment provides context,
+        # otherwise fired now to run in parallel with Stage 5a below.
+        if _pdf_context_block:
+            # Resolve immediately with empty results; no retriever call needed.
+            async def _empty_rag_coro() -> tuple[list, list, dict]:
+                return [], [], {}
+            rag_task = asyncio.ensure_future(_empty_rag_coro())
+        else:
+            rag_task = asyncio.ensure_future(
+                self._fetch_rag_chunks(resolved_query, query_vector, user_id, RAG_TOP_K, org_id=org_id, intent=intent)
+            )
 
         # Stage 5: Route by intent
         if intent in ("analytics", "comparison"):
@@ -813,13 +1112,14 @@ class QueryOrchestrator:
             if not analytics_results or all(not v for v in analytics_results.values()):
                 _rag_conf = compute_rag_confidence(rag_chunks)
                 _rag_relevant = rag_chunks and _rag_conf >= RAG_CONFIDENCE_THRESHOLD
-                if _rag_relevant:
-                    rag_text = build_rag_context(rag_chunks)
+                if _rag_relevant or _pdf_context_block:
+                    rag_text = build_rag_context(rag_chunks) if _rag_relevant else ""
+                    combined_kb = _pdf_context_block + rag_text if _pdf_context_block else rag_text
                     _nd_system = (
                         "You are VOXA, an AI Assistant. No database records were found for this query, "
                         "but the user has uploaded knowledge documents that may contain the answer.\n\n"
                         "--- KNOWLEDGE BASE ---\n"
-                        f"{rag_text}\n"
+                        f"{combined_kb}\n"
                         "--- END KNOWLEDGE BASE ---\n\n"
                         "Answer the user's question based on the knowledge base above. "
                         "If the answer is not present, say so clearly."
@@ -836,14 +1136,17 @@ class QueryOrchestrator:
                 async for token in self._llm.stream(msgs):
                     yield token
                     full.append(token)
+                if _pdf_context_block:
+                    yield _PDF_NOTE
+                    full.append(_PDF_NOTE)
                 _nd_text = "".join(full)
                 self._update_context(session_id, query, _nd_text, intent, [], None)
                 self._last_stream_meta[session_id] = {
                     "intent": intent, "source": _nd_source,
                     "confidence": _rag_conf if _rag_relevant else 0.0,
                     "collections_used": [],
-                    "routing": "rag_fallback" if _rag_relevant else "no_data_fallback",
-                    "citations": self._extract_citations(citation_map, source_filenames) if _rag_relevant else [],
+                    "routing": "rag_fallback" if (_rag_relevant or _pdf_context_block) else "no_data_fallback",
+                    "citations": _pdf_citations if _pdf_context_block else (self._extract_citations(citation_map, source_filenames) if _rag_relevant else []),
                 }
                 return
 
@@ -879,12 +1182,15 @@ class QueryOrchestrator:
             rag_text = build_rag_context(rag_chunks)
             if rag_text:
                 context_text = rag_text + "\n\n" + context_text
+            if _pdf_context_block:
+                context_text = _pdf_context_block + context_text
             system_content = self._build_intent_system(
                 context_text, intent, False,
                 query_meta=query_meta,
                 user_query=resolved_query,
                 citation_filenames=source_filenames,
                 analytics_results=analytics_results,
+                scope_restriction=_scope_restr,
             )
             msgs = [{"role": "system", "content": system_content}]
             msgs.append({"role": "user", "content": resolved_query})
@@ -892,12 +1198,15 @@ class QueryOrchestrator:
             async for token in self._llm.stream(msgs):
                 yield token
                 full.append(token)
+            if _pdf_context_block:
+                yield _PDF_NOTE
+                full.append(_PDF_NOTE)
             response_text = "".join(full)
             self._update_context(session_id, query, response_text, intent, selected, query_meta)
             self._last_stream_meta[session_id] = {
                 "intent": intent, "source": "mongodb_aggregation", "confidence": 1.0,
                 "collections_used": selected, "routing": "analytics",
-                "citations": self._extract_citations(citation_map, source_filenames),
+                "citations": _pdf_citations if _pdf_context_block else [],
             }
             return
 
@@ -916,7 +1225,7 @@ class QueryOrchestrator:
                 _ms(t5), total_records, total_pages, len(rag_chunks),
             )
 
-            if not fetched and not rag_chunks:
+            if not fetched and not rag_chunks and not _pdf_context_block:
                 _fb_full: list[str] = []
                 try:
                     async for _tok in self._llm.stream([
@@ -947,6 +1256,9 @@ class QueryOrchestrator:
             else:
                 context_text = build_context(fetched, page=page, page_size=DATA_QUERY_PAGE_SIZE)
 
+            if _pdf_context_block:
+                context_text = _pdf_context_block + context_text
+
             low_conf = ctx_source == "db_only" and validation.recommendation == "low_confidence"
             system_content = self._build_intent_system(
                 context_text, intent, low_conf,
@@ -954,6 +1266,7 @@ class QueryOrchestrator:
                 fetched=None if ctx_source == "rag_only" else fetched,
                 user_query=resolved_query,
                 citation_filenames=source_filenames,
+                scope_restriction=_scope_restr,
             )
             msgs = [{"role": "system", "content": system_content}]
             msgs.append({"role": "user", "content": resolved_query})
@@ -961,6 +1274,9 @@ class QueryOrchestrator:
             async for token in self._llm.stream(msgs):
                 yield token
                 full.append(token)
+            if _pdf_context_block:
+                yield _PDF_NOTE
+                full.append(_PDF_NOTE)
             response_text = "".join(full)
             collections_used = [] if ctx_source == "rag_only" else list(fetched.keys())
             self._update_context(session_id, query, response_text, intent, collections_used, query_meta)
@@ -970,7 +1286,7 @@ class QueryOrchestrator:
                 "confidence": 1.0 if ctx_source in ("rag_only", "merged") else validation.confidence,
                 "collections_used": collections_used,
                 "routing": f"data_query_{ctx_source}",
-                "citations": self._extract_citations(citation_map, source_filenames),
+                "citations": _pdf_citations if _pdf_context_block else (self._extract_citations(citation_map, source_filenames) if ctx_source in ("rag_only", "merged") else []),
                 "pagination": {
                     "total_records": 0 if ctx_source == "rag_only" else total_records,
                     "page": page,
@@ -1018,7 +1334,7 @@ class QueryOrchestrator:
         )
 
         validation = validate_retrieval(resolved_query, fetched, bool(query_vector), query_meta)
-        if validation.recommendation == "no_data" and not rag_chunks:
+        if validation.recommendation == "no_data" and not rag_chunks and not _pdf_context_block:
             _fb_full: list[str] = []
             try:
                 async for _tok in self._llm.stream([
@@ -1055,6 +1371,9 @@ class QueryOrchestrator:
         else:
             context_text = _build_stream_db_ctx(fetched)
 
+        if _pdf_context_block:
+            context_text = _pdf_context_block + context_text
+
         low_conf = ctx_source == "db_only" and validation.recommendation == "low_confidence"
         system_content = self._build_intent_system(
             context_text, intent, low_conf,
@@ -1062,6 +1381,7 @@ class QueryOrchestrator:
             fetched=None if ctx_source == "rag_only" else fetched,
             user_query=resolved_query,
             citation_filenames=source_filenames,
+            scope_restriction=_scope_restr,
         )
         msgs = [{"role": "system", "content": system_content}]
         msgs.append({"role": "user", "content": resolved_query})
@@ -1070,6 +1390,9 @@ class QueryOrchestrator:
         async for token in self._llm.stream(msgs):
             yield token
             full.append(token)
+        if _pdf_context_block:
+            yield _PDF_NOTE
+            full.append(_PDF_NOTE)
         response_text = "".join(full)
         self._update_context(session_id, query, response_text, intent, collections_used, query_meta)
         self._last_stream_meta[session_id] = {
@@ -1078,7 +1401,7 @@ class QueryOrchestrator:
             "confidence": 1.0 if ctx_source in ("rag_only", "merged") else validation.confidence,
             "collections_used": collections_used,
             "routing": f"sample_{ctx_source}",
-            "citations": self._extract_citations(citation_map, source_filenames),
+            "citations": _pdf_citations if _pdf_context_block else (self._extract_citations(citation_map, source_filenames) if ctx_source in ("rag_only", "merged") else []),
         }
 
     # -- DB pipeline (non-streaming) -------------------------------------------
@@ -1098,6 +1421,7 @@ class QueryOrchestrator:
     ) -> StructuredResponse:
         """Stages 3-9 for the non-streaming path."""
         pipeline_start = time.perf_counter()
+        _scope_restr = _build_scope_restriction(dashboard_context, self._metadata)
 
         # Stage 3: Collection selection
         t3 = time.perf_counter()
@@ -1206,6 +1530,7 @@ class QueryOrchestrator:
                 user_query=query,
                 citation_filenames=source_filenames,
                 analytics_results=analytics_results,
+                scope_restriction=_scope_restr,
             )
             msgs = [{"role": "system", "content": system_content}]
             msgs.append({"role": "user", "content": query})
@@ -1265,6 +1590,7 @@ class QueryOrchestrator:
                 fetched=None if ctx_source == "rag_only" else fetched,
                 user_query=query,
                 citation_filenames=source_filenames,
+                scope_restriction=_scope_restr,
             )
             msgs = [{"role": "system", "content": system_content}]
             msgs.append({"role": "user", "content": query})
@@ -1365,6 +1691,7 @@ class QueryOrchestrator:
             context_text, intent, low_conf, query_meta=query_meta,
             fetched=None if ctx_source == "rag_only" else fetched,
             user_query=query, citation_filenames=source_filenames,
+            scope_restriction=_scope_restr,
         )
         msgs = [{"role": "system", "content": system_content}]
         msgs.append({"role": "user", "content": query})
@@ -1833,6 +2160,7 @@ class QueryOrchestrator:
         user_query: str = "",
         citation_filenames: Optional[list] = None,
         analytics_results: Optional[dict] = None,
+        scope_restriction: str = "",
     ) -> str:
         """Build the retrieval-aware system prompt with intent-specific context."""
         doc_counts: dict[str, int] = {}    # filtered/matching counts
@@ -1885,6 +2213,7 @@ class QueryOrchestrator:
             doc_counts=doc_counts,
             total_counts=total_counts,
             has_filters=actually_filtered,
+            scope_restriction=scope_restriction,
         )
         return _build_prompt(ctx)
 
